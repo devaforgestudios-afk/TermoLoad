@@ -1,5 +1,5 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, DataTable, Static, Button ,Input, Label
+from textual.widgets import Header, Footer, DataTable, Static, Button ,Input, Label, TextLog
 from textual.containers import Container, Horizontal ,  Vertical
 from textual.screen import ModalScreen
 import random
@@ -13,6 +13,7 @@ import time
 import tkinter as tk
 import tkinter.filedialog
 import logging
+from collections import deque
 
 # Configure logging to file and console
 logging.basicConfig(
@@ -23,6 +24,23 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# in-memory log buffer to drive the app Logs view
+LOG_BUFFER = deque(maxlen=5000)
+
+
+class BufferingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            LOG_BUFFER.append(msg)
+        except Exception:
+            pass
+
+# attach buffering handler so all log messages are captured for the UI
+buffer_handler = BufferingHandler()
+buffer_handler.setLevel(logging.DEBUG)
+logging.getLogger().addHandler(buffer_handler)
 
 class RealDownloader:
     def __init__(self,app_instance):
@@ -82,27 +100,14 @@ class RealDownloader:
     def update_download_progress(self,download_id:int,progress:float,speed:float,eta:float,status:str):
         for i, download in enumerate(self.app.downloads):
             if download["id"] == download_id:
+                # update the underlying data model only. UI updates are handled
+                # by the DownloadManager.sync_table_from_downloads running in the
+                # main Textual event loop to avoid DataTable CellDoesNotExist errors.
                 logging.debug(f"[TermoLoad] update progress id={download_id} {int(progress*100)}% status={status}")
                 download["progress"] = progress
                 download["speed"] = self.format_speed(speed)
                 download["eta"] = self.format_time(eta)
                 download["status"] = status
-
-                try:
-                    row_key = download.get("row_key", i)
-                    self.app.downloads_table.update_cell(row_key, 3, f"{int(progress*100)}%")
-                    self.app.downloads_table.update_cell(row_key, 4, download["speed"])
-                    self.app.downloads_table.update_cell(row_key, 5, status)
-                    self.app.downloads_table.update_cell(row_key, 6, download["eta"])
-                except Exception:
-                    # fallback to index if row key doesn't work for this DataTable
-                    try:
-                        self.app.downloads_table.update_cell(i, 3, f"{int(progress*100)}%")
-                        self.app.downloads_table.update_cell(i, 4, download["speed"])
-                        self.app.downloads_table.update_cell(i, 5, status)
-                        self.app.downloads_table.update_cell(i, 6, download["eta"])
-                    except Exception:
-                        logging.exception("[TermoLoad] update_download_progress: failed to update table cells")
                 break
     def format_speed(self,bytes_per_second:float)-> str:
         if bytes_per_second == 0:
@@ -256,7 +261,7 @@ class DownloadManager(App):
         with Container(id="main"):
             yield DataTable(id="downloads_table")
             yield Static("⚙️ Settings will go here", id="settings_panel")
-            yield Static("📜 Logs will go here", id="logs_panel")
+            yield TextLog(id="logs_panel")
             yield Static("❓ Help/About here", id="help_panel")
 
         yield Footer()
@@ -264,7 +269,7 @@ class DownloadManager(App):
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
         self.settings_panel = self.query_one("#settings_panel", Static)
-        self.logs_panel = self.query_one("#logs_panel", Static)
+        self.logs_panel = self.query_one("#logs_panel", TextLog)
         self.help_panel = self.query_one("#help_panel", Static)
 
         self.settings_panel.visible = False
@@ -274,6 +279,80 @@ class DownloadManager(App):
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
 
         self.downloads = []
+        # schedule a periodic sync to refresh the DataTable from the downloads model
+        try:
+            # Textual's set_interval calls the coroutine/function on the app's event loop
+            self.set_interval(0.5, self.sync_table_from_downloads)
+        except Exception:
+            logging.exception("[TermoLoad] failed to set sync interval")
+
+    async def sync_table_from_downloads(self):
+        """Sync the DataTable cells from the underlying downloads list.
+
+        This runs in the Textual main loop to avoid cross-thread/data race
+        updates that can cause CellDoesNotExist exceptions.
+        """
+        try:
+            rebuild_needed = False
+            for i, d in enumerate(self.downloads):
+                try:
+                    row_key = d.get("row_key", i)
+                    # update cells
+                    self.downloads_table.update_cell(row_key, 3, f"{int(d.get('progress',0)*100)}%")
+                    self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
+                    self.downloads_table.update_cell(row_key, 5, d.get('status', 'Queued'))
+                    self.downloads_table.update_cell(row_key, 6, d.get('eta', '--'))
+                except Exception:
+                    # if any update fails, mark rebuild needed and stop trying updates
+                    rebuild_needed = True
+                    break
+
+            if rebuild_needed:
+                try:
+                    # Clear existing rows and re-add them so the DataTable's internal
+                    # row keys match what we store in each download entry.
+                    try:
+                        self.downloads_table.clear()
+                    except Exception:
+                        # if clear() is not available, remove rows individually
+                        try:
+                            # remove rows if API available
+                            while self.downloads_table.row_count > 0:
+                                self.downloads_table.remove_row(0)
+                        except Exception:
+                            pass
+
+                    for d in self.downloads:
+                        try:
+                            rk = self.downloads_table.add_row(
+                                str(d.get("id")),
+                                d.get("type", ""),
+                                d.get("name", ""),
+                                f"{int(d.get('progress',0)*100)}%",
+                                d.get('speed', '0 B/s'),
+                                d.get('status', 'Queued'),
+                                d.get('eta', '--')
+                            )
+                            d['row_key'] = rk
+                        except Exception:
+                            d['row_key'] = None
+                except Exception:
+                    logging.exception("[TermoLoad] sync_table_from_downloads: failed to rebuild table rows")
+
+            # flush buffered logs into the logs_panel
+            try:
+                if hasattr(self, 'logs_panel') and self.logs_panel:
+                    while LOG_BUFFER:
+                        line = LOG_BUFFER.popleft()
+                        try:
+                            self.logs_panel.write(line)
+                        except Exception:
+                            # ignore widget write failures
+                            pass
+            except Exception:
+                logging.exception('[TermoLoad] failed to flush LOG_BUFFER into logs_panel')
+        except Exception:
+            logging.exception("[TermoLoad] sync_table_from_downloads failed")
 
     def on_button_pressed(self, event) -> None:
         
