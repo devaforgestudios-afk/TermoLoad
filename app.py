@@ -89,12 +89,20 @@ class RealDownloader:
                 download["status"] = status
 
                 try:
-                    self.app.downloads_table.update_cell(i, 3, f"{int(progress*100)}%")
-                    self.app.downloads_table.update_cell(i, 4, download["speed"])
-                    self.app.downloads_table.update_cell(i, 5, status)
-                    self.app.downloads_table.update_cell(i, 6, download["eta"])
+                    row_key = download.get("row_key", i)
+                    self.app.downloads_table.update_cell(row_key, 3, f"{int(progress*100)}%")
+                    self.app.downloads_table.update_cell(row_key, 4, download["speed"])
+                    self.app.downloads_table.update_cell(row_key, 5, status)
+                    self.app.downloads_table.update_cell(row_key, 6, download["eta"])
                 except Exception:
-                    pass
+                    # fallback to index if row key doesn't work for this DataTable
+                    try:
+                        self.app.downloads_table.update_cell(i, 3, f"{int(progress*100)}%")
+                        self.app.downloads_table.update_cell(i, 4, download["speed"])
+                        self.app.downloads_table.update_cell(i, 5, status)
+                        self.app.downloads_table.update_cell(i, 6, download["eta"])
+                    except Exception:
+                        logging.exception("[TermoLoad] update_download_progress: failed to update table cells")
                 break
     def format_speed(self,bytes_per_second:float)-> str:
         if bytes_per_second == 0:
@@ -148,7 +156,6 @@ class AddDownloadModal(ModalScreen[dict]):
             logging.info(f"[TermoLoad] AddDownloadModal: user entered url={url} save_path={save_path}")
 
             if url:
-                # attempt to notify parent app directly if available
                 try:
                     app = self.app
                     if hasattr(app, 'process_modal_result'):
@@ -323,16 +330,33 @@ class DownloadManager(App):
                     "eta": "--"
                 }
                 logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
+                # add row to DataTable and store row key for later updates
+                try:
+                    row_key = self.downloads_table.add_row(
+                        str(new_entry["id"]),
+                        new_entry["type"],
+                        new_entry["name"],
+                        "0%",
+                        "0 B/s",
+                        "Queued",
+                        "--"
+                    )
+                except Exception:
+                    row_key = len(self.downloads)
+                    try:
+                        self.downloads_table.add_row(
+                            str(new_entry["id"]),
+                            new_entry["type"],
+                            new_entry["name"],
+                            "0%",
+                            "0 B/s",
+                            "Queued",
+                            "--"
+                        )
+                    except Exception:
+                        logging.exception("[TermoLoad] on_screen_dismissed: failed to add row to table")
+                new_entry["row_key"] = row_key
                 self.downloads.append(new_entry)
-                self.downloads_table.add_row(
-                    str(new_entry["id"]),
-                    new_entry["type"],
-                    new_entry["name"],
-                    "0%",
-                    "0 B/s",
-                    "Queued",
-                    "--"
-                )
                 self.downloads_table.visible = True
                 self.settings_panel.visible = False
                 self.logs_panel.visible = False
@@ -379,9 +403,9 @@ class DownloadManager(App):
             }
 
             logging.info(f"[TermoLoad] process_modal_result: appending new_entry {new_entry}")
-            self.downloads.append(new_entry)
+            # add row and store key
             try:
-                self.downloads_table.add_row(
+                row_key = self.downloads_table.add_row(
                     str(new_entry["id"]),
                     new_entry["type"],
                     new_entry["name"],
@@ -390,8 +414,11 @@ class DownloadManager(App):
                     "Queued",
                     "--"
                 )
+                new_entry["row_key"] = row_key
             except Exception:
                 logging.exception("[TermoLoad] process_modal_result: failed to add row to table")
+                new_entry["row_key"] = len(self.downloads)
+            self.downloads.append(new_entry)
 
             # ensure downloads view visible
             try:

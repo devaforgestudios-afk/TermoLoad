@@ -5,3 +5,31 @@
 2025-10-13 22:02:30,944 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
 2025-10-13 22:02:53,768 [DEBUG] Using proactor: IocpProactor
 2025-10-13 22:02:55,492 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 22:04:51,380 [DEBUG] Using proactor: IocpProactor
+2025-10-13 22:05:11,929 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 22:05:11,929 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads'}
+2025-10-13 22:05:11,929 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 1, 'type': 'URL', 'name': '1024', 'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-13 22:05:11,929 [INFO] [TermoLoad] process_modal_result: Queuing download 1 -> https://httpbin.org/bytes/1024 -> downloads
+2025-10-13 22:05:11,929 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 1
+2025-10-13 22:05:11,932 [INFO] [TermoLoad] Starting download_file id=1 url=https://httpbin.org/bytes/1024 path=downloads
+2025-10-13 22:05:16,162 [DEBUG] [TermoLoad] update progress id=1 100% status=Downloading
+2025-10-13 22:05:16,177 [DEBUG] [TermoLoad] update progress id=1 100% status=Completed
+2025-10-13 22:05:44,820 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 22:05:44,822 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads'}
+2025-10-13 22:05:44,822 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 2, 'type': 'URL', 'name': '1024', 'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-13 22:05:44,822 [INFO] [TermoLoad] process_modal_result: Queuing download 2 -> https://httpbin.org/bytes/1024 -> downloads
+2025-10-13 22:05:44,822 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 2
+2025-10-13 22:05:44,823 [INFO] [TermoLoad] Starting download_file id=2 url=https://httpbin.org/bytes/1024 path=downloads
+2025-10-13 22:05:46,363 [DEBUG] [TermoLoad] update progress id=2 100% status=Downloading
+2025-10-13 22:05:46,381 [DEBUG] [TermoLoad] update progress id=2 100% status=Completed
+2025-10-13 22:07:50,373 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf save_path=downloads
+2025-10-13 22:07:50,373 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads'}
+2025-10-13 22:07:50,373 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 3, 'type': 'URL', 'name': 'dummy.pdf', 'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-13 22:07:50,373 [INFO] [TermoLoad] process_modal_result: Queuing download 3 -> https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -> downloads
+2025-10-13 22:07:50,374 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 3
+2025-10-13 22:07:50,375 [INFO] [TermoLoad] Starting download_file id=3 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-13 22:07:51,336 [DEBUG] [TermoLoad] update progress id=3 23% status=Downloading
+2025-10-13 22:07:51,341 [DEBUG] [TermoLoad] update progress id=3 54% status=Downloading
+2025-10-13 22:07:51,355 [DEBUG] [TermoLoad] update progress id=3 95% status=Downloading
+2025-10-13 22:07:51,379 [DEBUG] [TermoLoad] update progress id=3 100% status=Downloading
+2025-10-13 22:07:51,397 [DEBUG] [TermoLoad] update progress id=3 100% status=Completed
