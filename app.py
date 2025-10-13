@@ -12,6 +12,17 @@ from urllib.parse import urlparse
 import time
 import tkinter as tk
 import tkinter.filedialog
+import logging
+
+# Configure logging to file and console
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler('termoload.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
 class RealDownloader:
     def __init__(self,app_instance):
@@ -28,14 +39,16 @@ class RealDownloader:
     
     async def download_file(self,url:str,download_id:int,filename:str = None, custom_path: str = "downloads"):
         try:
+            logging.info(f"[TermoLoad] Starting download_file id={download_id} url={url} path={custom_path}")
             await self.start_session()
 
             if not filename:
                 parsed = urlparse(url)
                 filename = os.path.basename(parsed.path) or f"download_{download_id}"
 
-            download_dir = Path("downloads")
-            download_dir.mkdir(parents=True,exist_ok=True)
+            # use the provided custom_path (fall back to "downloads")
+            download_dir = Path(custom_path or "downloads")
+            download_dir.mkdir(parents=True, exist_ok=True)
             filepath = download_dir / filename
 
             async with self.session.get(url) as response:
@@ -63,10 +76,13 @@ class RealDownloader:
                     self.update_download_progress(download_id, 0.0, 0, 0,f"Error:{response.status}")
                     return False
         except Exception as e:
-            self.update_download_progress(download_id, 0, 0, 0,f"Error:{str(e)}")
+            logging.exception(f"[TermoLoad] download_file exception id={download_id}: {e}")
+            self.update_download_progress(download_id, 0, 0, 0, f"Error:{str(e)}")
+            return False
     def update_download_progress(self,download_id:int,progress:float,speed:float,eta:float,status:str):
         for i, download in enumerate(self.app.downloads):
             if download["id"] == download_id:
+                logging.debug(f"[TermoLoad] update progress id={download_id} {int(progress*100)}% status={status}")
                 download["progress"] = progress
                 download["speed"] = self.format_speed(speed)
                 download["eta"] = self.format_time(eta)
@@ -129,7 +145,16 @@ class AddDownloadModal(ModalScreen[dict]):
             url = url_widget.value.strip()
             save_path = path_widget.value.strip() or "downloads"
 
+            logging.info(f"[TermoLoad] AddDownloadModal: user entered url={url} save_path={save_path}")
+
             if url:
+                # attempt to notify parent app directly if available
+                try:
+                    app = self.app
+                    if hasattr(app, 'process_modal_result'):
+                        app.process_modal_result({'url': url, 'path': save_path})
+                except Exception:
+                    pass
                 self.dismiss({"url":url,"path":save_path})
             else:
                 self.dismiss(None)
@@ -167,8 +192,8 @@ class PathSelectModel(ModalScreen[str]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "confirm_path":
             input_widget = self.query_one("#path_input", Input)
-            path = input_widget.strip
-            self.dimiss(path)
+            path = input_widget.value.strip()
+            self.dismiss(path)
         elif event.button.id == "cancel_path":
             self.dismiss(None)
         elif event.button.id == "browse_btn":
@@ -177,7 +202,7 @@ class PathSelectModel(ModalScreen[str]):
                 root.withdraw()
                 folder = tkinter.filedialog.askdirectory(title="Select Download Folder")
                 if folder:
-                    path_widget = self.query_one("save_path",Input)
+                    path_widget = self.query_one("#path_input", Input)
                     path_widget.value = folder
                 root.destroy()
             except:
@@ -270,32 +295,34 @@ class DownloadManager(App):
         self.push_screen(AddDownloadModal())
            
     
-    async def on_screen_dismissed(self,event):
+    async def on_screen_dismissed(self, event):
+        logging.info(f"[TermoLoad] on_screen_dismissed CALLED: screen={type(event.screen)} result={event.result}")
         if isinstance(event.screen, AddDownloadModal):
-            result= event.result
-            if result and isinstance(result,dict):
+            logging.info("[TermoLoad] on_screen_dismissed: AddDownloadModal detected")
+            result = event.result
+            logging.info(f"[TermoLoad] on_screen_dismissed: result={result}")
+            if result and isinstance(result, dict):
                 url = result["url"]
                 custom_path = result["path"]
-                
+                logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
                 new_id = len(self.downloads) + 1
                 d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
-                
                 if url.startswith(("http://", "https://")):
                     name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
                 else:
                     name = url.split("/")[-1] or f"download_{new_id}"
-                new_entry={
+                new_entry = {
                     "id": new_id,
                     "type": d_type,
                     "name": name,
                     "url": url,
-                    "path" : custom_path,
+                    "path": custom_path,
                     "progress": 0.0,
                     "speed": "0 B/s",
                     "status": "Queued",
                     "eta": "--"
-                
                 }
+                logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
                 self.downloads.append(new_entry)
                 self.downloads_table.add_row(
                     str(new_entry["id"]),
@@ -306,18 +333,87 @@ class DownloadManager(App):
                     "Queued",
                     "--"
                 )
-
                 self.downloads_table.visible = True
                 self.settings_panel.visible = False
                 self.logs_panel.visible = False
                 self.help_panel.visible = False
-                
-
                 if d_type == "URL":
-                    task = asyncio.create_task(
-                        self.downloader.download_file(url,new_id,name,custom_path)
+                    logging.info(f"[TermoLoad] Queuing download {new_id} -> {url} -> {custom_path}")
+                    try:
+                        task = asyncio.create_task(
+                            self.downloader.download_file(url, new_id, name, custom_path)
                         )
+                        self.download_tasks[new_id] = task
+                        logging.info(f"[TermoLoad] Created asyncio task for download {new_id}")
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] Failed to create task: {ex}")
+
+    def process_modal_result(self, result: dict):
+        """Process the modal result immediately. This helps when on_screen_dismissed isn't emitted in some environments."""
+        try:
+            logging.info(f"[TermoLoad] process_modal_result called with: {result}")
+            if not result or not isinstance(result, dict):
+                logging.debug("[TermoLoad] process_modal_result: nothing to do (no result)")
+                return
+
+            url = result.get('url')
+            custom_path = result.get('path')
+
+            new_id = len(self.downloads) + 1
+            d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
+            if url.startswith(("http://", "https://")):
+                name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
+            else:
+                name = url.split("/")[-1] or f"download_{new_id}"
+
+            new_entry = {
+                "id": new_id,
+                "type": d_type,
+                "name": name,
+                "url": url,
+                "path": custom_path,
+                "progress": 0.0,
+                "speed": "0 B/s",
+                "status": "Queued",
+                "eta": "--"
+            }
+
+            logging.info(f"[TermoLoad] process_modal_result: appending new_entry {new_entry}")
+            self.downloads.append(new_entry)
+            try:
+                self.downloads_table.add_row(
+                    str(new_entry["id"]),
+                    new_entry["type"],
+                    new_entry["name"],
+                    "0%",
+                    "0 B/s",
+                    "Queued",
+                    "--"
+                )
+            except Exception:
+                logging.exception("[TermoLoad] process_modal_result: failed to add row to table")
+
+            # ensure downloads view visible
+            try:
+                self.downloads_table.visible = True
+                self.settings_panel.visible = False
+                self.logs_panel.visible = False
+                self.help_panel.visible = False
+            except Exception:
+                pass
+
+            if d_type == "URL":
+                logging.info(f"[TermoLoad] process_modal_result: Queuing download {new_id} -> {url} -> {custom_path}")
+                try:
+                    task = asyncio.create_task(
+                        self.downloader.download_file(url, new_id, name, custom_path)
+                    )
                     self.download_tasks[new_id] = task
+                    logging.info(f"[TermoLoad] process_modal_result: Created asyncio task for download {new_id}")
+                except Exception as ex:
+                    logging.exception(f"[TermoLoad] process_modal_result: Failed to create task: {ex}")
+        except Exception:
+            logging.exception("[TermoLoad] process_modal_result: unexpected error")
 
     async def on_unmount(self) -> None:
         for task in self.download_tasks.values():

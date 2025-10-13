@@ -1,0 +1,7 @@
+2025-10-13 21:59:16,866 [DEBUG] Using proactor: IocpProactor
+2025-10-13 21:59:18,647 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 21:59:29,409 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 22:02:11,282 [DEBUG] Using proactor: IocpProactor
+2025-10-13 22:02:30,944 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-13 22:02:53,768 [DEBUG] Using proactor: IocpProactor
+2025-10-13 22:02:55,492 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
