@@ -1,5 +1,5 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, DataTable, Static, Button ,Input, Label, TextLog
+from textual.widgets import Header, Footer, DataTable, Static, Button ,Input, Label
 from textual.containers import Container, Horizontal ,  Vertical
 from textual.screen import ModalScreen
 import random
@@ -9,23 +9,23 @@ import aiofiles
 import os
 from pathlib import Path
 from urllib.parse import urlparse
+import json
 import time
 import tkinter as tk
 import tkinter.filedialog
+import sys
+import subprocess
 import logging
 from collections import deque
 
-# Configure logging to file and console
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('termoload.log', encoding='utf-8'),
-        logging.StreamHandler()
+        logging.FileHandler('termoload.log', encoding='utf-8')
     ]
 )
 
-# in-memory log buffer to drive the app Logs view
 LOG_BUFFER = deque(maxlen=5000)
 
 
@@ -37,7 +37,6 @@ class BufferingHandler(logging.Handler):
         except Exception:
             pass
 
-# attach buffering handler so all log messages are captured for the UI
 buffer_handler = BufferingHandler()
 buffer_handler.setLevel(logging.DEBUG)
 logging.getLogger().addHandler(buffer_handler)
@@ -64,7 +63,6 @@ class RealDownloader:
                 parsed = urlparse(url)
                 filename = os.path.basename(parsed.path) or f"download_{download_id}"
 
-            # use the provided custom_path (fall back to "downloads")
             download_dir = Path(custom_path or "downloads")
             download_dir.mkdir(parents=True, exist_ok=True)
             filepath = download_dir / filename
@@ -100,14 +98,20 @@ class RealDownloader:
     def update_download_progress(self,download_id:int,progress:float,speed:float,eta:float,status:str):
         for i, download in enumerate(self.app.downloads):
             if download["id"] == download_id:
-                # update the underlying data model only. UI updates are handled
-                # by the DownloadManager.sync_table_from_downloads running in the
-                # main Textual event loop to avoid DataTable CellDoesNotExist errors.
                 logging.debug(f"[TermoLoad] update progress id={download_id} {int(progress*100)}% status={status}")
                 download["progress"] = progress
                 download["speed"] = self.format_speed(speed)
                 download["eta"] = self.format_time(eta)
+                prev_status = download.get("status")
                 download["status"] = status
+                # mark that we've seen active downloads when status is 'Downloading'
+                try:
+                    if status == "Downloading":
+                        self.app._previous_had_active = True
+                        # if activity resumed, clear any previous shutdown trigger
+                        self.app._shutdown_triggered = False
+                except Exception:
+                    pass
                 break
     def format_speed(self,bytes_per_second:float)-> str:
         if bytes_per_second == 0:
@@ -228,8 +232,9 @@ class DownloadManager(App):
         }
     
     #modal_container{
-        width: 60;
-        height:15;
+        width: 45%;
+        height: 55%;
+        min-height: 12;
         background: $surface;
         border: thick $primary;
         padding: 1;
@@ -241,6 +246,42 @@ class DownloadManager(App):
         color: $accent;
         margin-bottom: 1;
         }
+    
+    #app_welcome{
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        padding: 2;
+        background: $surface;
+    }
+    #settings_panel{
+        height: 100%;
+        width: 100%;
+        overflow: auto;
+        padding: 1 2;
+        background: $surface;
+    }
+    /* improve button visibility and spacing in settings */
+    #settings_panel Button{
+        padding: 0 2;
+        min-width: 14;
+        color: $text;
+    }
+    #settings_panel Horizontal{
+        align: left middle;
+        padding-bottom: 1;
+    }
+    #settings_panel Input{
+        width: 100%;
+        min-height: 3;
+    }
+    #settings_panel Horizontal Input{
+        width: 1fr;
+    }
+    #settings_panel Horizontal Button{
+        margin-right: 1;
+        background: $boost;
+    }
     """
     
     def __init__(self):
@@ -259,26 +300,59 @@ class DownloadManager(App):
             yield Button("Help", id="btn_help")
 
         with Container(id="main"):
+            yield Static("TermoLoad - Download Manager", id="app_welcome")
+            with Vertical(id="settings_panel"):
+                yield Static("⚙️ Settings", id="settings_title")
+                yield Label("Default download folder:")
+                with Horizontal():
+                    yield Input(id="settings_download_folder", placeholder="e.g., C:\\Users\\You\\Downloads")
+                    yield Button("Browse", id="settings_browse", variant="default")
+                with Horizontal():
+                    yield Button("Save Settings", id="settings_save", variant="primary")
+                    yield Button("Cancel", id="settings_cancel", variant="default")
+
+                yield Label("Concurrent downloads:")
+                yield Input(id="settings_concurrent", placeholder="3")
+                yield Label("Max download speed (KB/s, 0 = unlimited):")
+                yield Input(id="settings_speed", placeholder="0")
+
+
+                yield Label("Shutdown PC when all downlaods complete ")
+                yield Input(id="settings_shutdown", placeholder="False")
+                yield Label("Allow real system shutdown (dangerous):")
+                yield Input(id="settings_allow_real_shutdown", placeholder="False")
+            yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
             yield DataTable(id="downloads_table")
-            yield Static("⚙️ Settings will go here", id="settings_panel")
-            yield TextLog(id="logs_panel")
+            yield Static("📜 Logs will go here", id="logs_panel")
             yield Static("❓ Help/About here", id="help_panel")
 
         yield Footer()
 
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
-        self.settings_panel = self.query_one("#settings_panel", Static)
-        self.logs_panel = self.query_one("#logs_panel", TextLog)
+        self.settings_panel = self.query_one("#settings_panel", Vertical)
+        self.logs_panel = self.query_one("#logs_panel", Static)
         self.help_panel = self.query_one("#help_panel", Static)
+        self.app_welcome = self.query_one("#app_welcome", Static)
+        self.no_downloads = self.query_one("#no_downloads", Static)
 
         self.settings_panel.visible = False
+        self.settings_panel.display = False
         self.logs_panel.visible = False
+        self.logs_panel.display = False
         self.help_panel.visible = False
+        self.help_panel.display = False
+        self.no_downloads.visible = True
+        self.no_downloads.display = True
 
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
 
         self.downloads = []
+        # shutdown state guards:
+        # _shutdown_triggered: True once we've already triggered shutdown for this run
+        # _previous_had_active: tracks whether we've seen any active downloads since start
+        self._shutdown_triggered = False
+        self._previous_had_active = False
         # schedule a periodic sync to refresh the DataTable from the downloads model
         try:
             # Textual's set_interval calls the coroutine/function on the app's event loop
@@ -286,37 +360,107 @@ class DownloadManager(App):
         except Exception:
             logging.exception("[TermoLoad] failed to set sync interval")
 
-    async def sync_table_from_downloads(self):
-        """Sync the DataTable cells from the underlying downloads list.
+        # load persisted settings (if present)
+        try:
+            self.load_settings()
+        except Exception:
+            logging.exception("[TermoLoad] failed to load settings")
 
-        This runs in the Textual main loop to avoid cross-thread/data race
-        updates that can cause CellDoesNotExist exceptions.
-        """
+    def load_settings(self):
+        settings_path = Path("settings.json")
+        defaults = {
+            "download_folder": str(Path.cwd() / "downloads"),
+            "concurrent": 3,
+            "max_speed_kb": 0,
+            "shutdown_on_complete": False,
+            # when True the app will execute a real system shutdown; keep False by default for safety
+            "allow_real_shutdown": False
+
+        }
+        if settings_path.exists():
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    self.settings = json.load(f)
+            except Exception:
+                logging.exception("[TermoLoad] failed to read settings.json, using defaults")
+                self.settings = defaults
+        else:
+            self.settings = defaults
+
+        # coerce shutdown_on_complete to a real boolean in case older saves stored it as a string
+        try:
+            soc = self.settings.get("shutdown_on_complete", False)
+            if isinstance(soc, str):
+                socv = soc.strip().lower()
+                self.settings["shutdown_on_complete"] = socv in ("true", "1", "yes", "y")
+            else:
+                # ints and bools handled by bool conversion (0 -> False, 1 -> True)
+                self.settings["shutdown_on_complete"] = bool(soc)
+        except Exception:
+            self.settings["shutdown_on_complete"] = False
+
+        try:
+            self.populate_settings_panel()
+        except Exception:
+            pass
+
+    def save_settings(self):
+        settings_path = Path("settings.json")
+        try:
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(self.settings, f, indent=2)
+            logging.info(f"[TermoLoad] settings saved to {settings_path}")
+        except Exception:
+            logging.exception("[TermoLoad] failed to save settings.json")
+
+    def populate_settings_panel(self):
+        try:
+            folder_input = self.query_one("#settings_download_folder", Input)
+            folder_input.value = str(self.settings.get("download_folder", "downloads"))
+        except Exception:
+            pass
+        try:
+            concurrent_input = self.query_one("#settings_concurrent", Input)
+            concurrent_input.value = str(self.settings.get("concurrent", 3))
+        except Exception:
+            pass
+        try:
+            speed_input = self.query_one("#settings_speed", Input)
+            speed_input.value = str(self.settings.get("max_speed_kb", 0))
+        except Exception:
+            pass
+        try:
+            shutdown_input = self.query_one("#settings_shutdown", Input)
+            shutdown_input.value = str(self.settings.get("max_speed_kb", False))
+            shutdown_input.value = str(self.settings.get("shutdown_on_complete", False))
+        except Exception:
+            pass
+        try:
+            allow_input = self.query_one("#settings_allow_real_shutdown", Input)
+            allow_input.value = str(self.settings.get("allow_real_shutdown", False))
+        except Exception:
+            pass
+
+    async def sync_table_from_downloads(self):
         try:
             rebuild_needed = False
             for i, d in enumerate(self.downloads):
                 try:
                     row_key = d.get("row_key", i)
-                    # update cells
                     self.downloads_table.update_cell(row_key, 3, f"{int(d.get('progress',0)*100)}%")
                     self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
                     self.downloads_table.update_cell(row_key, 5, d.get('status', 'Queued'))
                     self.downloads_table.update_cell(row_key, 6, d.get('eta', '--'))
                 except Exception:
-                    # if any update fails, mark rebuild needed and stop trying updates
                     rebuild_needed = True
                     break
 
             if rebuild_needed:
                 try:
-                    # Clear existing rows and re-add them so the DataTable's internal
-                    # row keys match what we store in each download entry.
                     try:
                         self.downloads_table.clear()
                     except Exception:
-                        # if clear() is not available, remove rows individually
                         try:
-                            # remove rows if API available
                             while self.downloads_table.row_count > 0:
                                 self.downloads_table.remove_row(0)
                         except Exception:
@@ -338,19 +482,45 @@ class DownloadManager(App):
                             d['row_key'] = None
                 except Exception:
                     logging.exception("[TermoLoad] sync_table_from_downloads: failed to rebuild table rows")
-
-            # flush buffered logs into the logs_panel
             try:
-                if hasattr(self, 'logs_panel') and self.logs_panel:
-                    while LOG_BUFFER:
-                        line = LOG_BUFFER.popleft()
-                        try:
-                            self.logs_panel.write(line)
-                        except Exception:
-                            # ignore widget write failures
-                            pass
+                if hasattr(self, 'logs_panel') and self.logs_panel and getattr(self.logs_panel, 'visible', False):
+                    try:
+                        # limit how many lines we render to avoid UI freezes when logs are large
+                        max_lines = 20
+                        if len(LOG_BUFFER) > max_lines:
+                            logs_text = "\n".join(list(LOG_BUFFER)[-max_lines:])
+                        else:
+                            logs_text = "\n".join(LOG_BUFFER)
+                        self.logs_panel.update(logs_text)
+                    except Exception:
+                        pass
             except Exception:
                 logging.exception('[TermoLoad] failed to flush LOG_BUFFER into logs_panel')
+            # show a friendly placeholder when there are no downloads
+            try:
+                no_dl = self.query_one("#no_downloads", Static)
+                if len(self.downloads) == 0:
+                    no_dl.visible = True
+                    no_dl.display = True
+                    try:
+                        self.downloads_table.visible = False
+                        self.downloads_table.display = False
+                    except Exception:
+                        pass
+                else:
+                    no_dl.visible = False
+                    no_dl.display = False
+                    try:
+                        self.downloads_table.visible = True
+                        self.downloads_table.display = True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                self.maybe_trigger_shutdown()
+            except Exception:
+                logging.exception("[TermoLoad] maybe_trigger_shutdown call failed")
         except Exception:
             logging.exception("[TermoLoad] sync_table_from_downloads failed")
 
@@ -360,19 +530,125 @@ class DownloadManager(App):
             self.push_screen(AddDownloadModal())
             return
 
-        self.downloads_table.visible = False
-        self.settings_panel.visible = False
-        self.logs_panel.visible = False
-        self.help_panel.visible = False
+        # settings panel interactions
+        if event.button.id == "settings_browse":
+            try:
+                root = tk.Tk()
+                root.withdraw()
+                folder = tkinter.filedialog.askdirectory(title="Select Default Download Folder")
+                if folder:
+                    try:
+                        folder_input = self.query_one("#settings_download_folder", Input)
+                        folder_input.value = folder
+                    except Exception:
+                        pass
+                root.destroy()
+            except Exception:
+                pass
+
+        if event.button.id == "settings_save":
+            try:
+                folder_input = self.query_one("#settings_download_folder", Input)
+                concurrent_input = self.query_one("#settings_concurrent", Input)
+                speed_input = self.query_one("#settings_speed", Input)
+                shutdown_input = self.query_one("#settings_shutdown", Input)
+                self.settings["download_folder"] = folder_input.value.strip() or str(Path.cwd() / "downloads")
+                try:
+                    self.settings["concurrent"] = int(concurrent_input.value.strip() or 3)
+                except Exception:
+                    self.settings["concurrent"] = 3
+                try:
+                    self.settings["max_speed_kb"] = int(speed_input.value.strip() or 0)
+                except Exception:
+                    self.settings["max_speed_kb"] = 0
+                try:
+                    sv = (shutdown_input.value or "").strip().lower()
+                    # store a real boolean, avoid accidentally storing non-empty strings which are truthy
+                    self.settings["shutdown_on_complete"] = sv in ("true", "1", "yes", "y")
+                except Exception:
+                    self.settings["shutdown_on_complete"] = False
+                try:
+                    allow_input = self.query_one("#settings_allow_real_shutdown", Input)
+                    av = (allow_input.value or "").strip().lower()
+                    self.settings["allow_real_shutdown"] = av in ("true", "1", "yes", "y")
+                except Exception:
+                    # keep previous value or default
+                    pass
+                self.save_settings()
+
+            except Exception:
+                logging.exception("[TermoLoad] failed to save settings from panel")
+
+        if event.button.id == "settings_cancel":
+            # reload settings to revert changes
+            try:
+                self.load_settings()
+            except Exception:
+                pass
+
+        # hide all panels initially (use display to prevent them taking layout space)
+        try:
+            self.downloads_table.visible = False
+            self.downloads_table.display = False
+        except Exception:
+            pass
+        try:
+            self.settings_panel.visible = False
+            self.settings_panel.display = False
+        except Exception:
+            pass
+        try:
+            self.logs_panel.visible = False
+            self.logs_panel.display = False
+        except Exception:
+            pass
+        try:
+            self.help_panel.visible = False
+            self.help_panel.display = False
+        except Exception:
+            pass
 
         if event.button.id == "btn_downloads":
-            self.downloads_table.visible = True
+            try:
+                self.downloads_table.visible = True
+                self.downloads_table.display = True
+            except Exception:
+                pass
+            try:
+                # schedule a deferred coroutine to attempt scrolling a few times
+                self.call_later(lambda: asyncio.create_task(self._deferred_scroll_to_top()))
+            except Exception:
+                try:
+                    self.scroll_downloads_to_top()
+                except Exception:
+                    pass
         elif event.button.id == "btn_settings":
-            self.settings_panel.visible = True
+            try:
+                self.settings_panel.visible = True
+                self.settings_panel.display = True
+            except Exception:
+                pass
         elif event.button.id == "btn_logs":
-            self.logs_panel.visible = True
+            try:
+                self.logs_panel.visible = True
+                self.logs_panel.display = True
+                try:
+                    self.logs_panel.update("Loading logs...")
+                except Exception:
+                    pass
+                try:
+                    # schedule background logs rendering to avoid blocking the UI
+                    asyncio.create_task(self._update_logs_panel())
+                except Exception:
+                    pass
+            except Exception:
+                pass
         elif event.button.id == "btn_help":
-            self.help_panel.visible = True
+            try:
+                self.help_panel.visible = True
+                self.help_panel.display = True
+            except Exception:
+                pass
 
         self.refresh()
 
@@ -409,7 +685,6 @@ class DownloadManager(App):
                     "eta": "--"
                 }
                 logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
-                # add row to DataTable and store row key for later updates
                 try:
                     row_key = self.downloads_table.add_row(
                         str(new_entry["id"]),
@@ -436,6 +711,13 @@ class DownloadManager(App):
                         logging.exception("[TermoLoad] on_screen_dismissed: failed to add row to table")
                 new_entry["row_key"] = row_key
                 self.downloads.append(new_entry)
+                try:
+                    self.call_later(lambda: asyncio.create_task(self._deferred_scroll_to_top()))
+                except Exception:
+                    try:
+                        self.scroll_downloads_to_top()
+                    except Exception:
+                        pass
                 self.downloads_table.visible = True
                 self.settings_panel.visible = False
                 self.logs_panel.visible = False
@@ -451,6 +733,93 @@ class DownloadManager(App):
                     except Exception as ex:
                         logging.exception(f"[TermoLoad] Failed to create task: {ex}")
 
+    def scroll_downloads_to_top(self) -> None:
+        """Ensure the downloads DataTable is scrolled to the top (row 0).
+
+        Uses available DataTable APIs when present, otherwise focuses the table.
+        """
+        try:
+            if hasattr(self, 'downloads_table'):
+                dt = self.downloads_table
+                if hasattr(dt, 'scroll_to_row'):
+                    dt.scroll_to_row(0)
+                elif hasattr(dt, 'action_scroll_home'):
+                    dt.action_scroll_home()
+                else:
+                    dt.focus()
+        except Exception:
+            logging.exception('[TermoLoad] scroll_downloads_to_top failed')
+
+    async def _deferred_scroll_to_top(self, retries: int = 4, delay: float = 0.05):
+        """Try scrolling to top a few times with small delays to accommodate layout timing."""
+        try:
+            for _ in range(retries):
+                try:
+                    self.scroll_downloads_to_top()
+                    return
+                except Exception:
+                    await asyncio.sleep(delay)
+            # final attempt
+            try:
+                self.scroll_downloads_to_top()
+            except Exception:
+                pass
+        except Exception:
+            logging.exception('[TermoLoad] _deferred_scroll_to_top failed')
+
+    def maybe_trigger_shutdown(self):
+        try:
+            # Only proceed if user enabled shutdown_on_complete
+            if not self.settings.get("shutdown_on_complete", False):
+                # clear any previous trigger state when option is disabled
+                self._shutdown_triggered = False
+                return
+
+            # Only trigger when we have at least one download and all downloads are Completed
+            if not self.downloads:
+                return
+
+            all_completed = all(d.get("status") == "Completed" for d in self.downloads)
+
+            # If any download is currently downloading or queued, mark that we've seen activity
+            active = [d for d in self.downloads if d.get("status") in ("Downloading", "Queued")]
+            if active:
+                self._previous_had_active = True
+                self._shutdown_triggered = False
+                logging.info(f"[TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down ({len(active)})")
+                return
+
+            # Only trigger if we've seen activity earlier in this run (avoid shutting down on startup)
+            if not self._previous_had_active:
+                logging.debug("[TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping")
+                return
+
+            # only trigger once per run
+            if self._shutdown_triggered:
+                return
+
+            if all_completed:
+                logging.info("[TermoLoad] maybe_trigger_shutdown: All downloads completed, initiating shutdown")
+                allow_real = bool(self.settings.get("allow_real_shutdown", False))
+                try:
+                    if allow_real:
+                        # perform a real system shutdown
+                        if sys.platform.startswith("win"):
+                            cmd = ["shutdown", "/s", "/t", "0"]
+                        else:
+                            cmd = ["shutdown", "-h", "now"]
+                        subprocess.Popen(cmd, shell=False)
+                        logging.info(f"[TermoLoad] maybe_trigger_shutdown: Shutdown command executed: {' '.join(cmd)}")
+                    else:
+                        # For safety/default: log simulated shutdown
+                        logging.info("[TermoLoad] DEBUG: Shut down (simulated)")
+                except Exception:
+                    logging.exception("[TermoLoad] maybe_trigger_shutdown: Failed to execute shutdown command")
+                self._shutdown_triggered = True
+        except Exception:
+            logging.exception("[TermoLoad] maybe_trigger_shutdown unexpected error")
+    
+    
     def process_modal_result(self, result: dict):
         """Process the modal result immediately. This helps when on_screen_dismissed isn't emitted in some environments."""
         try:
@@ -499,6 +868,11 @@ class DownloadManager(App):
                 new_entry["row_key"] = len(self.downloads)
             self.downloads.append(new_entry)
 
+            try:
+                self.scroll_downloads_to_top()
+            except Exception:
+                pass
+
             # ensure downloads view visible
             try:
                 self.downloads_table.visible = True
@@ -526,6 +900,37 @@ class DownloadManager(App):
             if not task.done():
                 task.cancel()
         await self.downloader.close_session()
+    
+    async def _update_logs_panel(self):
+        """Incrementally update the logs panel in small chunks to avoid UI freezes."""
+        try:
+            if not hasattr(self, 'logs_panel') or not self.logs_panel:
+                return
+            # render only the last N lines to avoid heavy rendering
+            lines = list(LOG_BUFFER)
+            max_lines = 20
+            start = max(0, len(lines) - max_lines)
+            chunk_size = 200
+            # clear first and render in chunks
+            try:
+                self.logs_panel.update("")
+            except Exception:
+                pass
+            for i in range(start, len(lines), chunk_size):
+                if not getattr(self.logs_panel, 'visible', False):
+                    return
+                chunk = lines[i:i+chunk_size]
+                text = "\n".join(chunk)
+                try:
+                    # append to existing content
+                    existing = getattr(self.logs_panel, 'renderable', None) or ""
+                    new_text = (existing + "\n" + text).lstrip("\n")
+                    self.logs_panel.update(new_text)
+                except Exception:
+                    pass
+                await asyncio.sleep(0)
+        except Exception:
+            logging.exception("[TermoLoad] _update_logs_panel failed")
         
 if __name__ == "__main__":
     app = DownloadManager()

@@ -1,10 +1,75 @@
-2025-10-13 22:23:47,873 [DEBUG] Using proactor: IocpProactor
-2025-10-13 22:24:07,933 [DEBUG] Using proactor: IocpProactor
-2025-10-13 22:24:24,379 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
-2025-10-13 22:24:24,379 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads'}
-2025-10-13 22:24:24,379 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 1, 'type': 'URL', 'name': '1024', 'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
-2025-10-13 22:24:24,380 [INFO] [TermoLoad] process_modal_result: Queuing download 1 -> https://httpbin.org/bytes/1024 -> downloads
-2025-10-13 22:24:24,380 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 1
-2025-10-13 22:24:24,381 [INFO] [TermoLoad] Starting download_file id=1 url=https://httpbin.org/bytes/1024 path=downloads
-2025-10-13 22:25:03,282 [DEBUG] [TermoLoad] update progress id=1 100% status=Downloading
-2025-10-13 22:25:03,296 [DEBUG] [TermoLoad] update progress id=1 100% status=Completed
+2025-10-15 21:00:10,213 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:00:10,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:11,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:11,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:12,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:12,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:13,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:13,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:14,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:14,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:15,282 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:15,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:16,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:16,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:17,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:17,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:18,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:18,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:19,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:19,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:20,310 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:20,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:21,279 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:21,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:22,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:22,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:23,278 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:23,778 [DEBUG] [TermoLoad] maybe_trigger_shutdown: no active downloads but none were seen earlier in this run; skipping
+2025-10-15 21:00:23,808 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=downloads
+2025-10-15 21:00:23,808 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads'}
+2025-10-15 21:00:23,808 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 1, 'type': 'URL', 'name': '1024', 'url': 'https://httpbin.org/bytes/1024', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-15 21:00:23,809 [INFO] [TermoLoad] process_modal_result: Queuing download 1 -> https://httpbin.org/bytes/1024 -> downloads
+2025-10-15 21:00:23,809 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 1
+2025-10-15 21:00:23,810 [INFO] [TermoLoad] Starting download_file id=1 url=https://httpbin.org/bytes/1024 path=downloads
+2025-10-15 21:00:24,278 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-15 21:00:24,778 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-15 21:00:25,101 [DEBUG] [TermoLoad] update progress id=1 0% status=Error:503
+2025-10-15 21:00:25,278 [INFO] [TermoLoad] maybe_trigger_shutdown: No active downloads, initiating shutdown
+2025-10-15 21:00:25,278 [INFO] [TermoLoad] DEBUG: Shut down (simulated)
+2025-10-15 21:00:34,838 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://httpbin.org/bytes/1024 save_path=E:/
+2025-10-15 21:00:34,838 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://httpbin.org/bytes/1024', 'path': 'E:/'}
+2025-10-15 21:00:34,838 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 2, 'type': 'URL', 'name': '1024', 'url': 'https://httpbin.org/bytes/1024', 'path': 'E:/', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-15 21:00:34,838 [INFO] [TermoLoad] process_modal_result: Queuing download 2 -> https://httpbin.org/bytes/1024 -> E:/
+2025-10-15 21:00:34,838 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 2
+2025-10-15 21:00:34,839 [INFO] [TermoLoad] Starting download_file id=2 url=https://httpbin.org/bytes/1024 path=E:/
+2025-10-15 21:00:35,134 [DEBUG] [TermoLoad] update progress id=2 0% status=Error:503
+2025-10-15 21:00:58,202 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf save_path=E:/
+2025-10-15 21:00:58,202 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'E:/'}
+2025-10-15 21:00:58,202 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 3, 'type': 'URL', 'name': 'dummy.pdf', 'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'E:/', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-15 21:00:58,203 [INFO] [TermoLoad] process_modal_result: Queuing download 3 -> https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -> E:/
+2025-10-15 21:00:58,203 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 3
+2025-10-15 21:00:58,204 [INFO] [TermoLoad] Starting download_file id=3 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=E:/
+2025-10-15 21:00:58,278 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-15 21:00:58,778 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-15 21:00:59,230 [DEBUG] [TermoLoad] update progress id=3 53% status=Downloading
+2025-10-15 21:00:59,235 [DEBUG] [TermoLoad] update progress id=3 73% status=Downloading
+2025-10-15 21:00:59,248 [DEBUG] [TermoLoad] update progress id=3 94% status=Downloading
+2025-10-15 21:00:59,278 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-15 21:00:59,292 [DEBUG] [TermoLoad] update progress id=3 100% status=Downloading
+2025-10-15 21:00:59,303 [DEBUG] [TermoLoad] update progress id=3 100% status=Completed
+2025-10-15 21:00:59,778 [INFO] [TermoLoad] maybe_trigger_shutdown: No active downloads, initiating shutdown
+2025-10-15 21:00:59,778 [INFO] [TermoLoad] DEBUG: Shut down (simulated)
+2025-10-15 21:05:36,735 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:05:43,384 [INFO] [TermoLoad] settings saved to settings.json
+2025-10-15 21:05:54,551 [INFO] [TermoLoad] settings saved to settings.json
+2025-10-15 21:06:44,720 [INFO] [TermoLoad] settings saved to settings.json
+2025-10-15 21:08:37,980 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:08:45,670 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:09:54,221 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:12:48,380 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:25:13,124 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:27:11,989 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:31:38,838 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:46:42,849 [DEBUG] Using proactor: IocpProactor
+2025-10-15 21:46:58,053 [DEBUG] Using proactor: IocpProactor
