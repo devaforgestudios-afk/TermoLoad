@@ -17,6 +17,7 @@ import sys
 import subprocess
 import logging
 from collections import deque
+from typing import Optional, Dict, Any, List
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -47,7 +48,11 @@ class RealDownloader:
         self.session = None
     async def start_session(self):
         if not self.session:
-            self.session = aiohttp.ClientSession()
+            try:
+                connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300)
+            except Exception:
+                connector = None
+            self.session = aiohttp.ClientSession(connector=connector) if connector else aiohttp.ClientSession()
 
     async def close_session(self):
         if self.session:
@@ -67,33 +72,135 @@ class RealDownloader:
             download_dir.mkdir(parents=True, exist_ok=True)
             filepath = download_dir / filename
 
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    total_size = int(response.headers.get('content-length', 0))
+            # Determine if we can resume
+            existing_size = 0
+            if filepath.exists():
+                try:
+                    existing_size = filepath.stat().st_size
+                except Exception:
+                    existing_size = 0
+
+            headers = {}
+            if existing_size > 0:
+                headers["Range"] = f"bytes={existing_size}-"
+
+            async with self.session.get(url, headers=headers) as response:
+                status = response.status
+                if status == 206:
+                    part_len = int(response.headers.get("content-length", 0))
+                    total_size = None
+                    cr = response.headers.get("content-range") or response.headers.get("Content-Range")
+                    if cr:
+                        try:
+                            after_slash = cr.split("/")[-1]
+                            if after_slash.strip().isdigit():
+                                total_size = int(after_slash.strip())
+                        except Exception:
+                            total_size = None
+                    if total_size is None and part_len > 0:
+                        total_size = existing_size + part_len
+                    open_mode = 'ab'
+                    downloaded = existing_size
+                elif status == 200:
+                    total_size = int(response.headers.get('content-length', 0)) or None
+                    open_mode = 'wb'
                     downloaded = 0
-                    start_time = time.time()
-
-                    async with aiofiles.open(filepath, 'wb') as file:
-                        async for chunk in response.content.iter_chunked(8192):
-                            await file.write(chunk)
-                            downloaded += len(chunk)
-
-                            progress = downloaded/ total_size if total_size > 0 else 0
-                            elapsed = time.time() - start_time
-                            speed = downloaded/elapsed if elapsed > 0 else 0
-                            eta = (total_size - downloaded) / speed if speed>0 else 0
-
-                            self.update_download_progress(download_id, progress, speed, eta,"Downloading")
-                            await asyncio.sleep(0.01)
-
-                    self.update_download_progress(download_id, 1.0, 0, 0,"Completed")
-                    return True
+                    if existing_size > 0:
+                        try:
+                            filepath.unlink(missing_ok=True)
+                        except Exception:
+                            pass
                 else:
-                    self.update_download_progress(download_id, 0.0, 0, 0,f"Error:{response.status}")
+                    self.update_download_progress(download_id, 0.0, 0, 0, f"Error:{status}")
+                    try:
+                        self.app.save_downloads_state(force=True)
+                    except Exception:
+                        pass
                     return False
+                try:
+                    for d in self.app.downloads:
+                        if d.get("id") == download_id:
+                            d["filepath"] = str(filepath)
+                            d["total_size"] = total_size if total_size is not None else 0
+                            d["downloaded_bytes"] = downloaded
+                            d["status"] = "Downloading"
+                            break
+                except Exception:
+                    pass
+
+                start_time = time.time()
+                chunk_size = 256 * 1024  # 256KB for throughput
+                ema_speed = None
+                ema_alpha = 0.2
+                last_t = start_time
+                bytes_window = 0
+                async with aiofiles.open(filepath, open_mode) as file:
+                    idx = 0
+                    async for chunk in response.content.iter_chunked(chunk_size):
+                        if not chunk:
+                            await asyncio.sleep(0)
+                            continue
+                        await file.write(chunk)
+                        downloaded += len(chunk)
+                        bytes_window += len(chunk)
+
+                        # progress
+                        progress = (downloaded / total_size) if (total_size and total_size > 0) else 0
+                        now = time.time()
+                        dt = now - last_t
+                        inst_speed = (bytes_window / dt) if dt > 0 else 0
+                        bytes_window = 0
+                        last_t = now
+                        if ema_speed is None:
+                            ema_speed = inst_speed
+                        else:
+                            ema_speed = ema_alpha * inst_speed + (1 - ema_alpha) * ema_speed
+                        speed = ema_speed or 0
+                        eta = ((total_size - downloaded) / speed) if (total_size and speed > 0) else 0
+                        try:
+                            for d in self.app.downloads:
+                                if d.get("id") == download_id:
+                                    d["downloaded_bytes"] = downloaded
+                                    if total_size:
+                                        d["total_size"] = total_size
+                                    d["_smoothed_bps"] = speed
+                                    break
+                        except Exception:
+                            pass
+
+                        self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+                        idx += 1
+                        if (idx % 8) == 0:
+                            await asyncio.sleep(0)
+
+                if total_size and downloaded >= total_size:
+                    self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                else:
+                    self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                try:
+                    self.app.save_downloads_state(force=True)
+                except Exception:
+                    pass
+                return True
+        except asyncio.CancelledError:
+            try:
+                d = next((x for x in self.app.downloads if x.get("id") == download_id), None)
+                if d:
+                    total = int(d.get("total_size") or 0)
+                    done = int(d.get("downloaded_bytes") or 0)
+                    progress = (done / total) if total else d.get("progress", 0.0)
+                    self.update_download_progress(download_id, progress, 0, 0, "Paused")
+                    self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return False
         except Exception as e:
             logging.exception(f"[TermoLoad] download_file exception id={download_id}: {e}")
             self.update_download_progress(download_id, 0, 0, 0, f"Error:{str(e)}")
+            try:
+                self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
             return False
     def update_download_progress(self,download_id:int,progress:float,speed:float,eta:float,status:str):
         for i, download in enumerate(self.app.downloads):
@@ -104,11 +211,9 @@ class RealDownloader:
                 download["eta"] = self.format_time(eta)
                 prev_status = download.get("status")
                 download["status"] = status
-                # mark that we've seen active downloads when status is 'Downloading'
                 try:
                     if status == "Downloading":
                         self.app._previous_had_active = True
-                        # if activity resumed, clear any previous shutdown trigger
                         self.app._shutdown_triggered = False
                 except Exception:
                     pass
@@ -282,6 +387,12 @@ class DownloadManager(App):
         margin-right: 1;
         background: $boost;
     }
+    #downloads_toolbar {
+        padding: 0 1;
+    }
+    #downloads_toolbar Button {
+        margin-right: 1;
+    }
     """
     
     def __init__(self):
@@ -322,6 +433,11 @@ class DownloadManager(App):
                 yield Label("Allow real system shutdown (dangerous):")
                 yield Input(id="settings_allow_real_shutdown", placeholder="False")
             yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
+            with Horizontal(id="downloads_toolbar"):
+                yield Button("Pause Selected", id="btn_pause_sel")
+                yield Button("Resume Selected", id="btn_resume_sel")
+                yield Button("Pause All", id="btn_pause_all")
+                yield Button("Resume All", id="btn_resume_all")
             yield DataTable(id="downloads_table")
             yield Static("📜 Logs will go here", id="logs_panel")
             yield Static("❓ Help/About here", id="help_panel")
@@ -330,6 +446,7 @@ class DownloadManager(App):
 
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
+        self.downloads_toolbar = self.query_one("#downloads_toolbar", Horizontal)
         self.settings_panel = self.query_one("#settings_panel", Vertical)
         self.logs_panel = self.query_one("#logs_panel", Static)
         self.help_panel = self.query_one("#help_panel", Static)
@@ -344,27 +461,57 @@ class DownloadManager(App):
         self.help_panel.display = False
         self.no_downloads.visible = True
         self.no_downloads.display = True
+        self.downloads_toolbar.visible = False
+        self.downloads_toolbar.display = False
 
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
 
-        self.downloads = []
-        # shutdown state guards:
-        # _shutdown_triggered: True once we've already triggered shutdown for this run
-        # _previous_had_active: tracks whether we've seen any active downloads since start
-        self._shutdown_triggered = False
-        self._previous_had_active = False
-        # schedule a periodic sync to refresh the DataTable from the downloads model
-        try:
-            # Textual's set_interval calls the coroutine/function on the app's event loop
-            self.set_interval(0.5, self.sync_table_from_downloads)
-        except Exception:
-            logging.exception("[TermoLoad] failed to set sync interval")
-
-        # load persisted settings (if present)
         try:
             self.load_settings()
         except Exception:
             logging.exception("[TermoLoad] failed to load settings")
+
+        try:
+            persisted = self.load_downloads_state()
+        except Exception:
+            persisted = []
+        self.downloads = []
+        try:
+            for entry in persisted:
+                d = {
+                    "id": entry.get("id", len(self.downloads) + 1),
+                    "type": entry.get("type", "URL"),
+                    "name": entry.get("name", f"download_{len(self.downloads)+1}"),
+                    "url": entry.get("url", ""),
+                    "path": entry.get("path", self.settings.get("download_folder", str(Path.cwd()/"downloads"))),
+                    "progress": float(entry.get("progress", 0.0)),
+                    "speed": entry.get("speed", "0 B/s"),
+                    "status": entry.get("status", "Paused"),
+                    "eta": entry.get("eta", "--"),
+                    "downloaded_bytes": int(entry.get("downloaded_bytes", 0) or 0),
+                    "total_size": int(entry.get("total_size", 0) or 0),
+                    "filepath": entry.get("filepath", "")
+                }
+                try:
+                    rk = self.downloads_table.add_row(
+                        str(d["id"]), d["type"], d["name"], f"{int(d['progress']*100)}%", d["speed"], d["status"], d["eta"]
+                    )
+                except Exception:
+                    rk = len(self.downloads)
+                d["row_key"] = rk
+                self.downloads.append(d)
+        except Exception:
+            logging.exception("[TermoLoad] Failed to rebuild table from persisted state")
+        self._shutdown_triggered = False
+        self._previous_had_active = False
+        try:
+            self.set_interval(0.5, self.sync_table_from_downloads)
+        except Exception:
+            logging.exception("[TermoLoad] failed to set sync interval")
+        try:
+            await self._resume_incomplete_downloads()
+        except Exception:
+            logging.exception("[TermoLoad] Failed to resume incomplete downloads on startup")
 
     def load_settings(self):
         settings_path = Path("settings.json")
@@ -373,7 +520,6 @@ class DownloadManager(App):
             "concurrent": 3,
             "max_speed_kb": 0,
             "shutdown_on_complete": False,
-            # when True the app will execute a real system shutdown; keep False by default for safety
             "allow_real_shutdown": False
 
         }
@@ -386,15 +532,12 @@ class DownloadManager(App):
                 self.settings = defaults
         else:
             self.settings = defaults
-
-        # coerce shutdown_on_complete to a real boolean in case older saves stored it as a string
         try:
             soc = self.settings.get("shutdown_on_complete", False)
             if isinstance(soc, str):
                 socv = soc.strip().lower()
                 self.settings["shutdown_on_complete"] = socv in ("true", "1", "yes", "y")
             else:
-                # ints and bools handled by bool conversion (0 -> False, 1 -> True)
                 self.settings["shutdown_on_complete"] = bool(soc)
         except Exception:
             self.settings["shutdown_on_complete"] = False
@@ -447,7 +590,22 @@ class DownloadManager(App):
             for i, d in enumerate(self.downloads):
                 try:
                     row_key = d.get("row_key", i)
-                    self.downloads_table.update_cell(row_key, 3, f"{int(d.get('progress',0)*100)}%")
+                    # Progress: two-decimal percent + bytes if available
+                    prog = float(d.get('progress', 0) or 0)
+                    pct = f"{prog*100:.2f}%"
+                    dl = int(d.get('downloaded_bytes', 0) or 0)
+                    total = int(d.get('total_size', 0) or 0)
+                    def _fmt_bytes(n:int)->str:
+                        if n < 1024:
+                            return f"{n} B"
+                        elif n < 1024**2:
+                            return f"{n/1024:.1f} KB"
+                        elif n < 1024**3:
+                            return f"{n/(1024**2):.1f} MB"
+                        else:
+                            return f"{n/(1024**3):.1f} GB"
+                    bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
+                    self.downloads_table.update_cell(row_key, 3, pct + bytes_txt)
                     self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
                     self.downloads_table.update_cell(row_key, 5, d.get('status', 'Queued'))
                     self.downloads_table.update_cell(row_key, 6, d.get('eta', '--'))
@@ -468,11 +626,25 @@ class DownloadManager(App):
 
                     for d in self.downloads:
                         try:
+                            prog = float(d.get('progress', 0) or 0)
+                            pct = f"{prog*100:.2f}%"
+                            dl = int(d.get('downloaded_bytes', 0) or 0)
+                            total = int(d.get('total_size', 0) or 0)
+                            def _fmt_bytes(n:int)->str:
+                                if n < 1024:
+                                    return f"{n} B"
+                                elif n < 1024**2:
+                                    return f"{n/1024:.1f} KB"
+                                elif n < 1024**3:
+                                    return f"{n/(1024**2):.1f} MB"
+                                else:
+                                    return f"{n/(1024**3):.1f} GB"
+                            bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
                             rk = self.downloads_table.add_row(
                                 str(d.get("id")),
                                 d.get("type", ""),
                                 d.get("name", ""),
-                                f"{int(d.get('progress',0)*100)}%",
+                                pct + bytes_txt,
                                 d.get('speed', '0 B/s'),
                                 d.get('status', 'Queued'),
                                 d.get('eta', '--')
@@ -485,7 +657,6 @@ class DownloadManager(App):
             try:
                 if hasattr(self, 'logs_panel') and self.logs_panel and getattr(self.logs_panel, 'visible', False):
                     try:
-                        # limit how many lines we render to avoid UI freezes when logs are large
                         max_lines = 20
                         if len(LOG_BUFFER) > max_lines:
                             logs_text = "\n".join(list(LOG_BUFFER)[-max_lines:])
@@ -496,7 +667,6 @@ class DownloadManager(App):
                         pass
             except Exception:
                 logging.exception('[TermoLoad] failed to flush LOG_BUFFER into logs_panel')
-            # show a friendly placeholder when there are no downloads
             try:
                 no_dl = self.query_one("#no_downloads", Static)
                 if len(self.downloads) == 0:
@@ -505,6 +675,8 @@ class DownloadManager(App):
                     try:
                         self.downloads_table.visible = False
                         self.downloads_table.display = False
+                        self.downloads_toolbar.visible = False
+                        self.downloads_toolbar.display = False
                     except Exception:
                         pass
                 else:
@@ -513,6 +685,8 @@ class DownloadManager(App):
                     try:
                         self.downloads_table.visible = True
                         self.downloads_table.display = True
+                        self.downloads_toolbar.visible = True
+                        self.downloads_toolbar.display = True
                     except Exception:
                         pass
             except Exception:
@@ -521,6 +695,10 @@ class DownloadManager(App):
                 self.maybe_trigger_shutdown()
             except Exception:
                 logging.exception("[TermoLoad] maybe_trigger_shutdown call failed")
+            try:
+                self._throttled_save_state()
+            except Exception:
+                pass
         except Exception:
             logging.exception("[TermoLoad] sync_table_from_downloads failed")
 
@@ -529,8 +707,19 @@ class DownloadManager(App):
         if event.button.id == "btn_add":
             self.push_screen(AddDownloadModal())
             return
+        if event.button.id == "btn_pause_sel":
+            self._pause_selected()
+            return
+        if event.button.id == "btn_resume_sel":
+            self._resume_selected()
+            return
+        if event.button.id == "btn_pause_all":
+            self._pause_all()
+            return
+        if event.button.id == "btn_resume_all":
+            self._resume_all()
+            return
 
-        # settings panel interactions
         if event.button.id == "settings_browse":
             try:
                 root = tk.Tk()
@@ -563,7 +752,6 @@ class DownloadManager(App):
                     self.settings["max_speed_kb"] = 0
                 try:
                     sv = (shutdown_input.value or "").strip().lower()
-                    # store a real boolean, avoid accidentally storing non-empty strings which are truthy
                     self.settings["shutdown_on_complete"] = sv in ("true", "1", "yes", "y")
                 except Exception:
                     self.settings["shutdown_on_complete"] = False
@@ -572,7 +760,6 @@ class DownloadManager(App):
                     av = (allow_input.value or "").strip().lower()
                     self.settings["allow_real_shutdown"] = av in ("true", "1", "yes", "y")
                 except Exception:
-                    # keep previous value or default
                     pass
                 self.save_settings()
 
@@ -580,16 +767,16 @@ class DownloadManager(App):
                 logging.exception("[TermoLoad] failed to save settings from panel")
 
         if event.button.id == "settings_cancel":
-            # reload settings to revert changes
             try:
                 self.load_settings()
             except Exception:
                 pass
 
-        # hide all panels initially (use display to prevent them taking layout space)
         try:
             self.downloads_table.visible = False
             self.downloads_table.display = False
+            self.downloads_toolbar.visible = False
+            self.downloads_toolbar.display = False
         except Exception:
             pass
         try:
@@ -612,10 +799,12 @@ class DownloadManager(App):
             try:
                 self.downloads_table.visible = True
                 self.downloads_table.display = True
+                if len(self.downloads) > 0:
+                    self.downloads_toolbar.visible = True
+                    self.downloads_toolbar.display = True
             except Exception:
                 pass
             try:
-                # schedule a deferred coroutine to attempt scrolling a few times
                 self.call_later(lambda: asyncio.create_task(self._deferred_scroll_to_top()))
             except Exception:
                 try:
@@ -637,7 +826,6 @@ class DownloadManager(App):
                 except Exception:
                     pass
                 try:
-                    # schedule background logs rendering to avoid blocking the UI
                     asyncio.create_task(self._update_logs_panel())
                 except Exception:
                     pass
@@ -652,8 +840,79 @@ class DownloadManager(App):
 
         self.refresh()
 
+    def _get_selected_download(self) -> Optional[Dict[str, Any]]:
+        """Return the selected download dict based on the table's cursor."""
+        try:
+            dt = self.downloads_table
+            row_key = None
+            if hasattr(dt, "cursor_row") and dt.cursor_row is not None:
+                row_key = dt.cursor_row
+            elif hasattr(dt, "cursor_coordinate") and dt.cursor_coordinate is not None:
+                row_key = dt.cursor_coordinate.row
+            if row_key is None:
+                return None
+            for d in self.downloads:
+                if d.get("row_key", None) == row_key:
+                    return d
+            # Fallback by index
+            idx = getattr(row_key, "row", None)
+            if isinstance(idx, int) and 0 <= idx < len(self.downloads):
+                return self.downloads[idx]
+            return None
+        except Exception:
+            return None
+
+    def _pause_download(self, download_id: int) -> None:
+        try:
+            task = self.download_tasks.get(download_id)
+            if task and not task.done():
+                task.cancel()
+            for d in self.downloads:
+                if d.get("id") == download_id:
+                    d["status"] = "Paused"
+                    break
+            self.save_downloads_state()
+        except Exception:
+            logging.exception("[TermoLoad] _pause_download failed")
+
+    def _resume_download(self, download_id: int) -> None:
+        try:
+            d = next((x for x in self.downloads if x.get("id") == download_id), None)
+            if not d or d.get("status") == "Completed":
+                return
+            t = self.download_tasks.get(download_id)
+            if t and not t.done():
+                return
+            d["status"] = "Queued"
+            url = d.get("url")
+            name = d.get("name")
+            save_path = d.get("path") or "downloads"
+            task = asyncio.create_task(self.downloader.download_file(url, download_id, name, save_path))
+            self.download_tasks[download_id] = task
+            self.save_downloads_state()
+        except Exception:
+            logging.exception("[TermoLoad] _resume_download failed")
+
+    def _pause_selected(self) -> None:
+        d = self._get_selected_download()
+        if d:
+            self._pause_download(int(d.get("id")))
+
+    def _resume_selected(self) -> None:
+        d = self._get_selected_download()
+        if d:
+            self._resume_download(int(d.get("id")))
+
+    def _pause_all(self) -> None:
+        for d in list(self.downloads):
+            self._pause_download(int(d.get("id")))
+
+    def _resume_all(self) -> None:
+        for d in list(self.downloads):
+            if d.get("status") != "Completed":
+                self._resume_download(int(d.get("id")))
+
     def action_add_download(self) -> None:
-        """Action for 'a' key binding."""
         self.push_screen(AddDownloadModal())
            
     
@@ -690,7 +949,7 @@ class DownloadManager(App):
                         str(new_entry["id"]),
                         new_entry["type"],
                         new_entry["name"],
-                        "0%",
+                        "0.00%",
                         "0 B/s",
                         "Queued",
                         "--"
@@ -702,7 +961,7 @@ class DownloadManager(App):
                             str(new_entry["id"]),
                             new_entry["type"],
                             new_entry["name"],
-                            "0%",
+                            "0.00%",
                             "0 B/s",
                             "Queued",
                             "--"
@@ -711,6 +970,10 @@ class DownloadManager(App):
                         logging.exception("[TermoLoad] on_screen_dismissed: failed to add row to table")
                 new_entry["row_key"] = row_key
                 self.downloads.append(new_entry)
+                try:
+                    self.save_downloads_state()
+                except Exception:
+                    pass
                 try:
                     self.call_later(lambda: asyncio.create_task(self._deferred_scroll_to_top()))
                 except Exception:
@@ -734,10 +997,6 @@ class DownloadManager(App):
                         logging.exception(f"[TermoLoad] Failed to create task: {ex}")
 
     def scroll_downloads_to_top(self) -> None:
-        """Ensure the downloads DataTable is scrolled to the top (row 0).
-
-        Uses available DataTable APIs when present, otherwise focuses the table.
-        """
         try:
             if hasattr(self, 'downloads_table'):
                 dt = self.downloads_table
@@ -751,7 +1010,6 @@ class DownloadManager(App):
             logging.exception('[TermoLoad] scroll_downloads_to_top failed')
 
     async def _deferred_scroll_to_top(self, retries: int = 4, delay: float = 0.05):
-        """Try scrolling to top a few times with small delays to accommodate layout timing."""
         try:
             for _ in range(retries):
                 try:
@@ -769,32 +1027,23 @@ class DownloadManager(App):
 
     def maybe_trigger_shutdown(self):
         try:
-            # Only proceed if user enabled shutdown_on_complete
             if not self.settings.get("shutdown_on_complete", False):
-                # clear any previous trigger state when option is disabled
                 self._shutdown_triggered = False
                 return
-
-            # Only trigger when we have at least one download and all downloads are Completed
             if not self.downloads:
                 return
 
             all_completed = all(d.get("status") == "Completed" for d in self.downloads)
-
-            # If any download is currently downloading or queued, mark that we've seen activity
             active = [d for d in self.downloads if d.get("status") in ("Downloading", "Queued")]
             if active:
                 self._previous_had_active = True
                 self._shutdown_triggered = False
                 logging.info(f"[TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down ({len(active)})")
                 return
-
-            # Only trigger if we've seen activity earlier in this run (avoid shutting down on startup)
             if not self._previous_had_active:
                 logging.debug("[TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping")
                 return
 
-            # only trigger once per run
             if self._shutdown_triggered:
                 return
 
@@ -803,7 +1052,6 @@ class DownloadManager(App):
                 allow_real = bool(self.settings.get("allow_real_shutdown", False))
                 try:
                     if allow_real:
-                        # perform a real system shutdown
                         if sys.platform.startswith("win"):
                             cmd = ["shutdown", "/s", "/t", "0"]
                         else:
@@ -811,7 +1059,6 @@ class DownloadManager(App):
                         subprocess.Popen(cmd, shell=False)
                         logging.info(f"[TermoLoad] maybe_trigger_shutdown: Shutdown command executed: {' '.join(cmd)}")
                     else:
-                        # For safety/default: log simulated shutdown
                         logging.info("[TermoLoad] DEBUG: Shut down (simulated)")
                 except Exception:
                     logging.exception("[TermoLoad] maybe_trigger_shutdown: Failed to execute shutdown command")
@@ -851,13 +1098,12 @@ class DownloadManager(App):
             }
 
             logging.info(f"[TermoLoad] process_modal_result: appending new_entry {new_entry}")
-            # add row and store key
             try:
                 row_key = self.downloads_table.add_row(
                     str(new_entry["id"]),
                     new_entry["type"],
                     new_entry["name"],
-                    "0%",
+                    "0.00%",
                     "0 B/s",
                     "Queued",
                     "--"
@@ -867,13 +1113,15 @@ class DownloadManager(App):
                 logging.exception("[TermoLoad] process_modal_result: failed to add row to table")
                 new_entry["row_key"] = len(self.downloads)
             self.downloads.append(new_entry)
+            try:
+                self.save_downloads_state()
+            except Exception:
+                pass
 
             try:
                 self.scroll_downloads_to_top()
             except Exception:
                 pass
-
-            # ensure downloads view visible
             try:
                 self.downloads_table.visible = True
                 self.settings_panel.visible = False
@@ -896,22 +1144,27 @@ class DownloadManager(App):
             logging.exception("[TermoLoad] process_modal_result: unexpected error")
 
     async def on_unmount(self) -> None:
+        try:
+            for d in self.downloads:
+                if d.get("status") in ("Downloading", "Queued"):
+                    d["status"] = "Paused"
+            self.save_downloads_state(force=True)
+        except Exception:
+            pass
+
         for task in self.download_tasks.values():
             if not task.done():
                 task.cancel()
         await self.downloader.close_session()
     
     async def _update_logs_panel(self):
-        """Incrementally update the logs panel in small chunks to avoid UI freezes."""
         try:
             if not hasattr(self, 'logs_panel') or not self.logs_panel:
                 return
-            # render only the last N lines to avoid heavy rendering
             lines = list(LOG_BUFFER)
             max_lines = 20
             start = max(0, len(lines) - max_lines)
             chunk_size = 200
-            # clear first and render in chunks
             try:
                 self.logs_panel.update("")
             except Exception:
@@ -922,7 +1175,6 @@ class DownloadManager(App):
                 chunk = lines[i:i+chunk_size]
                 text = "\n".join(chunk)
                 try:
-                    # append to existing content
                     existing = getattr(self.logs_panel, 'renderable', None) or ""
                     new_text = (existing + "\n" + text).lstrip("\n")
                     self.logs_panel.update(new_text)
@@ -931,6 +1183,75 @@ class DownloadManager(App):
                 await asyncio.sleep(0)
         except Exception:
             logging.exception("[TermoLoad] _update_logs_panel failed")
+    def _state_file(self) -> Path:
+        return Path("downloads_state.json")
+
+    def save_downloads_state(self, force: bool = False) -> None:
+        try:
+            data = {
+                "downloads": [
+                    {
+                        "id": d.get("id"),
+                        "type": d.get("type"),
+                        "name": d.get("name"),
+                        "url": d.get("url"),
+                        "path": d.get("path"),
+                        "progress": float(d.get("progress", 0.0)),
+                        "speed": d.get("speed", "0 B/s"),
+                        "status": d.get("status", "Queued"),
+                        "eta": d.get("eta", "--"),
+                        "downloaded_bytes": int(d.get("downloaded_bytes", 0) or 0),
+                        "total_size": int(d.get("total_size", 0) or 0),
+                        "filepath": d.get("filepath", "")
+                    }
+                    for d in self.downloads
+                ]
+            }
+            with self._state_file().open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            logging.exception("[TermoLoad] Failed to save downloads_state.json")
+
+    def load_downloads_state(self) -> List[Dict[str, Any]]:
+        path = self._state_file()
+        if not path.exists():
+            return []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("downloads", [])
+        except Exception:
+            logging.exception("[TermoLoad] Failed to read downloads_state.json")
+            return []
+
+    def _throttled_save_state(self) -> None:
+        now = time.time()
+        last = getattr(self, "_last_state_save", 0)
+        if now - last >= 2.0:
+            self.save_downloads_state()
+            self._last_state_save = now
+
+    async def _resume_incomplete_downloads(self) -> None:
+        try:
+            await self.downloader.start_session()
+        except Exception:
+            pass
+        for d in list(self.downloads):
+            try:
+                if d.get("type") != "URL":
+                    continue
+                if d.get("status") in ("Completed", "Error"):
+                    continue
+                d["status"] = "Queued"
+                url = d.get("url")
+                name = d.get("name")
+                save_path = d.get("path") or "downloads"
+                did = d.get("id")
+                task = asyncio.create_task(self.downloader.download_file(url, did, name, save_path))
+                self.download_tasks[did] = task
+            except Exception:
+                logging.exception("[TermoLoad] Failed to queue resume for download")
+
         
 if __name__ == "__main__":
     app = DownloadManager()
