@@ -802,6 +802,9 @@ class DownloadManager(App):
                 yield Button("Resume Selected", id="btn_resume_sel")
                 yield Button("Pause All", id="btn_pause_all")
                 yield Button("Resume All", id="btn_resume_all")
+                yield Button("Delete File", id="btn_delete_file", variant="error")
+                yield Button("Remove From List", id="button_remove_list")
+                yield Button("Delete + Remove",id="btn_delete_and_remove", variant="error")
             yield DataTable(id="downloads_table")
             yield Static("📜 Logs will go here", id="logs_panel")
             yield Static("❓ Help/About here", id="help_panel")
@@ -829,6 +832,12 @@ class DownloadManager(App):
         self.downloads_toolbar.display = False
 
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
+        # Make row selection explicit and visible
+        try:
+            self.downloads_table.cursor_type = "row"
+            self.downloads_table.show_cursor = True
+        except Exception:
+            pass
 
         try:
             self.load_settings()
@@ -876,6 +885,16 @@ class DownloadManager(App):
             await self._resume_incomplete_downloads()
         except Exception:
             logging.exception("[TermoLoad] Failed to resume incomplete downloads on startup")
+        # Put initial focus on the table for immediate keyboard selection
+        try:
+            self.downloads_table.focus()
+            if getattr(self.downloads_table, "row_count", 0) > 0:
+                try:
+                    self.downloads_table.cursor_row = 0
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def load_settings(self):
         settings_path = Path("settings.json")
@@ -951,10 +970,15 @@ class DownloadManager(App):
     async def sync_table_from_downloads(self):
         try:
             rebuild_needed = False
+            selected_index = None
+            try:
+                if hasattr(self.downloads_table, "cursor_row") and self.downloads_table.cursor_row is not None:
+                    selected_index = int(self.downloads_table.cursor_row)
+            except Exception:
+                selected_index = None
             for i, d in enumerate(self.downloads):
                 try:
                     row_key = d.get("row_key", i)
-                    # Progress: ASCII bar + two-decimal percent + bytes if available
                     prog = max(0.0, min(1.0, float(d.get('progress', 0) or 0)))
                     pct = f"{prog*100:.2f}%"
                     dl = int(d.get('downloaded_bytes', 0) or 0)
@@ -1022,6 +1046,13 @@ class DownloadManager(App):
                             d['row_key'] = rk
                         except Exception:
                             d['row_key'] = None
+                    # Restore selection if possible
+                    try:
+                        if selected_index is not None and self.downloads_table.row_count:
+                            idx = max(0, min(selected_index, self.downloads_table.row_count - 1))
+                            self.downloads_table.cursor_row = idx
+                    except Exception:
+                        pass
                 except Exception:
                     logging.exception("[TermoLoad] sync_table_from_downloads: failed to rebuild table rows")
             try:
@@ -1085,6 +1116,15 @@ class DownloadManager(App):
             return
         if event.button.id == "btn_pause_all":
             self._pause_all()
+            return
+        if event.button.id == "btn_delete_file":
+            asyncio.create_task(self._delete_selected_file_async(delete_partials=True, remove_from_list=False))
+            return
+        if event.button.id == "button_remove_list":
+            self._remove_selected_from_list()
+            return
+        if event.button.id == "btn_delete_and_remove":
+            asyncio.create_task(self._delete_selected_file_async(delete_partials=True, remove_from_list=True))
             return
         if event.button.id == "btn_resume_all":
             self._resume_all()
@@ -1172,6 +1212,10 @@ class DownloadManager(App):
                 if len(self.downloads) > 0:
                     self.downloads_toolbar.visible = True
                     self.downloads_toolbar.display = True
+                try:
+                    self.downloads_table.focus()
+                except Exception:
+                    pass
             except Exception:
                 pass
             try:
@@ -1211,26 +1255,142 @@ class DownloadManager(App):
         self.refresh()
 
     def _get_selected_download(self) -> Optional[Dict[str, Any]]:
-        """Return the selected download dict based on the table's cursor."""
         try:
             dt = self.downloads_table
-            row_key = None
+            # Prefer row index; Textual's DataTable uses integer cursor_row for row selection
             if hasattr(dt, "cursor_row") and dt.cursor_row is not None:
-                row_key = dt.cursor_row
+                idx = int(dt.cursor_row)
             elif hasattr(dt, "cursor_coordinate") and dt.cursor_coordinate is not None:
-                row_key = dt.cursor_coordinate.row
-            if row_key is None:
+                idx = int(getattr(dt.cursor_coordinate, "row", 0))
+            else:
                 return None
-            for d in self.downloads:
-                if d.get("row_key", None) == row_key:
-                    return d
-            # Fallback by index
-            idx = getattr(row_key, "row", None)
-            if isinstance(idx, int) and 0 <= idx < len(self.downloads):
+            if 0 <= idx < len(self.downloads):
                 return self.downloads[idx]
             return None
         except Exception:
             return None
+
+    def _resolve_download_path(self, d: dict) -> Optional[Path]:
+        """Resolve the final file path for a download entry.
+        Uses stored filepath when available; otherwise derives from path+name.
+        """
+        try:
+            fp = d.get("filepath")
+            if fp:
+                return Path(fp)
+            base_dir = d.get("path") or self.settings.get("download_folder", str(Path.cwd() / "downloads"))
+            name = d.get("name")
+            if base_dir and name:
+                return Path(base_dir) / name
+            return None
+        except Exception:
+            return None
+
+    def _delete_download_files(self, d: dict, delete_partials: bool = True) -> int:
+        deleted = 0
+        try:
+            main_path = self._resolve_download_path(d)
+            if main_path and main_path.exists():
+                try:
+                    main_path.unlink()
+                    deleted += 1
+                except Exception:
+                    logging.exception(f"[TermoLoad] failed to delete file: {main_path}")
+            if delete_partials and main_path:
+                candidates = [
+                    Path(str(main_path) + ".part"),
+                    Path(str(main_path) + ".tmp"),
+                    main_path.with_suffix(main_path.suffix + ".part"),
+                    main_path.with_suffix(main_path.suffix + ".ytdl"),
+                    main_path.with_suffix(main_path.suffix + ".temp"),
+                ]
+                for p in candidates:
+                    try:
+                        if p.exists():
+                            p.unlink()
+                            deleted += 1
+                    except Exception:
+                        pass
+        except Exception:
+            logging.exception("[TermoLoad] _delete_download_files unexpected error")
+        return deleted
+
+    def _remove_download_entry(self, download_id: int) -> None:
+        try:
+            task = self.download_tasks.pop(download_id, None)
+            if task and not task.done():
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            idx = None
+            row_key = None
+            for i, item in enumerate(self.downloads):
+                if int(item.get("id")) == int(download_id):
+                    idx = i
+                    row_key = item.get("row_key")
+                    break
+            try:
+                if row_key is not None:
+                    self.downloads_table.remove_row(row_key)
+            except Exception:
+                pass
+            if idx is not None:
+                self.downloads.pop(idx)
+            self.save_downloads_state()
+        except Exception:
+            logging.exception("[TermoLoad] _remove_download_entry failed")
+
+    def _delete_selected_file(self, delete_partials: bool = True) -> None:
+        d = self._get_selected_download()
+        if not d:
+            return
+        self._delete_download_files(d, delete_partials=delete_partials)
+        try:
+            d.pop("filepath", None)
+        except Exception:
+            pass
+        self.save_downloads_state()
+
+    def _remove_selected_from_list(self) -> None:
+        d = self._get_selected_download()
+        if not d:
+            return
+        try:
+            self._remove_download_entry(int(d.get("id")))
+        except Exception:
+            logging.exception("[TermoLoad] _remove_selected_from_list failed")
+
+    async def _delete_selected_file_async(self, delete_partials: bool = True, remove_from_list: bool = False) -> None:
+        """Safely delete the selected download's file even if it's downloading.
+        Cancels any running task, waits a tick, deletes files, and optionally removes the row.
+        """
+        d = self._get_selected_download()
+        if not d:
+            return
+        did = int(d.get("id"))
+        try:
+            task = self.download_tasks.get(did)
+            if task and not task.done():
+                task.cancel()
+                await asyncio.sleep(0)
+        except Exception:
+            pass
+        try:
+            d["status"] = "Paused"
+        except Exception:
+            pass
+        self._delete_download_files(d, delete_partials=delete_partials)
+        try:
+            d.pop("filepath", None)
+        except Exception:
+            pass
+        self.save_downloads_state()
+        if remove_from_list:
+            try:
+                self._remove_download_entry(did)
+            except Exception:
+                pass
 
     def _pause_download(self, download_id: int) -> None:
         try:
@@ -1248,16 +1408,43 @@ class DownloadManager(App):
     def _resume_download(self, download_id: int) -> None:
         try:
             d = next((x for x in self.downloads if x.get("id") == download_id), None)
-            if not d or d.get("status") == "Completed":
+            if not d:
                 return
             t = self.download_tasks.get(download_id)
             if t and not t.done():
                 return
-            d["status"] = "Queued"
             url = d.get("url")
             name = d.get("name")
             save_path = d.get("path") or "downloads"
-            task = asyncio.create_task(self.downloader.download_file(url, download_id, name, save_path))
+
+            try:
+                if d.get("status") == "Completed":
+                    fp = d.get("filepath")
+                    if fp:
+                        try:
+                            Path(fp).unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            derived = Path(save_path) / (name or f"download_{download_id}")
+                            derived.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    d["progress"] = 0.0
+                    d["speed"] = "0 B/s"
+                    d["eta"] = "--"
+                    d["downloaded_bytes"] = 0
+                    d["total_size"] = 0
+                    d["filepath"] = ""
+            except Exception:
+                pass
+
+            d["status"] = "Queued"
+            if d.get("type") == "Video":
+                task = asyncio.create_task(self.downloader.download_with_ytdlp(url, download_id, save_path, None))
+            else:
+                task = asyncio.create_task(self.downloader.download_file(url, download_id, name, save_path))
             self.download_tasks[download_id] = task
             self.save_downloads_state()
         except Exception:
@@ -1279,8 +1466,7 @@ class DownloadManager(App):
 
     def _resume_all(self) -> None:
         for d in list(self.downloads):
-            if d.get("status") != "Completed":
-                self._resume_download(int(d.get("id")))
+            self._resume_download(int(d.get("id")))
 
     def action_add_download(self) -> None:
         self.push_screen(AddDownloadModal())
@@ -1298,7 +1484,6 @@ class DownloadManager(App):
                 logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
                 new_id = len(self.downloads) + 1
                 d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
-                # upgrade to Video for known video sites (YouTube)
                 try:
                     if d_type == "URL" and RealDownloader.is_video_url(url):
                         d_type = "Video"
@@ -1374,7 +1559,6 @@ class DownloadManager(App):
                 elif d_type == "Video":
                     logging.info(f"[TermoLoad] Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
                     try:
-                        # Set a placeholder name until yt-dlp determines title; it will update item["name"]
                         try:
                             for item in self.downloads:
                                 if item.get("id") == new_id:
@@ -1412,7 +1596,6 @@ class DownloadManager(App):
                     return
                 except Exception:
                     await asyncio.sleep(delay)
-            # final attempt
             try:
                 self.scroll_downloads_to_top()
             except Exception:
@@ -1474,7 +1657,6 @@ class DownloadManager(App):
 
             new_id = len(self.downloads) + 1
             d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
-            # upgrade to Video when applicable
             try:
                 if d_type == "URL" and RealDownloader.is_video_url(url):
                     d_type = "Video"
@@ -1543,7 +1725,6 @@ class DownloadManager(App):
             elif d_type == "Video":
                 logging.info(f"[TermoLoad] process_modal_result: Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
                 try:
-                    # Placeholder name until yt-dlp sets the actual title-based name
                     try:
                         for item in self.downloads:
                             if item.get("id") == new_id:
