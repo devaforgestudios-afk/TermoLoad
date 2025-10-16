@@ -78,7 +78,6 @@ class RealDownloader:
             if filename:
                 outtmpl = str((Path(custom_path)/filename).with_suffix(".%(ext)s"))
             else:
-                # Let yt-dlp use the actual video title
                 outtmpl = str(Path(custom_path)/"%(title)s.%(ext)s")
             
             def _hook(d: dict):
@@ -222,7 +221,6 @@ class RealDownloader:
                         except Exception:
                             pass
                 elif status == 416:
-                    # Range Not Satisfiable: check if our local file is already complete or invalid
                     try:
                         cr = response.headers.get("content-range") or response.headers.get("Content-Range")
                         total_len = None
@@ -234,7 +232,6 @@ class RealDownloader:
                         total_len = None
 
                     if total_len is not None and existing_size == total_len and total_len > 0:
-                        # Our local file already has the full size; mark as completed
                         try:
                             for d in self.app.downloads:
                                 if d.get("id") == download_id:
@@ -251,19 +248,16 @@ class RealDownloader:
                             pass
                         return True
 
-                    # Otherwise, remove the partial (or truncate) and retry once
                     try:
                         if filepath.exists():
                             filepath.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    # First retry with an explicit Range: bytes=0- (some servers prefer this over no-Range)
                     async with self.session.get(url, headers={"Range": "bytes=0-"}) as r2:
                         if r2.status == 200:
                             total_size = int(r2.headers.get('content-length', 0)) or None
                             open_mode = 'wb'
                             downloaded = 0
-                            # proceed to stream below using r2
                             try:
                                 for d in self.app.downloads:
                                     if d.get("id") == download_id:
@@ -329,7 +323,6 @@ class RealDownloader:
                                 pass
                             return True
                         elif r2.status == 206:
-                            # 206 with bytes=0-; treat same as full restart
                             total_size = int(r2.headers.get('content-length', 0)) or None
                             open_mode = 'wb'
                             downloaded = 0
@@ -716,12 +709,18 @@ class DownloadManager(App):
         margin-bottom: 1;
         }
     
-    #app_welcome{
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        padding: 2;
-        background: $surface;
+    #main{
+        height: 100%;
+        padding: 0;
+        margin: 0;
+    }
+    #navbar{
+        height: auto;
+        padding: 0 1;
+    }
+    #no_downloads{
+        padding: 1 2;
+        color: $text-muted;
     }
     #settings_panel{
         height: 100%;
@@ -757,6 +756,21 @@ class DownloadManager(App):
     #downloads_toolbar Button {
         margin-right: 1;
     }
+    #status_info{
+        padding: 0 1;
+        color: $warning;
+    }
+    #help_panel{
+        height: 100%;
+        width: 100%;
+        overflow-y: auto;
+        overflow-x: auto;
+        scrollbar-size: 2 1;
+        padding: 1 2;
+        background: $surface;
+        text-style: none;
+        color: $text;
+    }
     """
     
     def __init__(self):
@@ -775,7 +789,6 @@ class DownloadManager(App):
             yield Button("Help", id="btn_help")
 
         with Container(id="main"):
-            yield Static("TermoLoad - Download Manager", id="app_welcome")
             with Vertical(id="settings_panel"):
                 yield Static("⚙️ Settings", id="settings_title")
                 yield Label("Default download folder:")
@@ -806,6 +819,7 @@ class DownloadManager(App):
                 yield Button("Remove From List", id="button_remove_list")
                 yield Button("Delete + Remove",id="btn_delete_and_remove", variant="error")
             yield DataTable(id="downloads_table")
+            yield Static("", id="status_info")
             yield Static("📜 Logs will go here", id="logs_panel")
             yield Static("❓ Help/About here", id="help_panel")
 
@@ -817,7 +831,7 @@ class DownloadManager(App):
         self.settings_panel = self.query_one("#settings_panel", Vertical)
         self.logs_panel = self.query_one("#logs_panel", Static)
         self.help_panel = self.query_one("#help_panel", Static)
-        self.app_welcome = self.query_one("#app_welcome", Static)
+        self.status_info = self.query_one("#status_info", Static)
         self.no_downloads = self.query_one("#no_downloads", Static)
 
         self.settings_panel.visible = False
@@ -830,6 +844,10 @@ class DownloadManager(App):
         self.no_downloads.display = True
         self.downloads_toolbar.visible = False
         self.downloads_toolbar.display = False
+        self.downloads_table.visible = False
+        self.downloads_table.display = False
+        self.status_info.visible = False
+        self.status_info.display = False
 
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
         # Make row selection explicit and visible
@@ -843,6 +861,12 @@ class DownloadManager(App):
             self.load_settings()
         except Exception:
             logging.exception("[TermoLoad] failed to load settings")
+
+        # Populate initial Help content
+        try:
+            self.help_panel.update(self._build_help_text())
+        except Exception:
+            pass
 
         try:
             persisted = self.load_downloads_state()
@@ -875,6 +899,18 @@ class DownloadManager(App):
                 self.downloads.append(d)
         except Exception:
             logging.exception("[TermoLoad] Failed to rebuild table from persisted state")
+        
+        # Show/hide download widgets based on whether we have downloads (default view is Downloads tab if items exist)
+        if len(self.downloads) > 0:
+            self.downloads_table.visible = True
+            self.downloads_table.display = True
+            self.downloads_toolbar.visible = True
+            self.downloads_toolbar.display = True
+            self.status_info.visible = True
+            self.status_info.display = True
+            self.no_downloads.visible = False
+            self.no_downloads.display = False
+        
         self._shutdown_triggered = False
         self._previous_had_active = False
         try:
@@ -885,7 +921,6 @@ class DownloadManager(App):
             await self._resume_incomplete_downloads()
         except Exception:
             logging.exception("[TermoLoad] Failed to resume incomplete downloads on startup")
-        # Put initial focus on the table for immediate keyboard selection
         try:
             self.downloads_table.focus()
             if getattr(self.downloads_table, "row_count", 0) > 0:
@@ -1046,7 +1081,6 @@ class DownloadManager(App):
                             d['row_key'] = rk
                         except Exception:
                             d['row_key'] = None
-                    # Restore selection if possible
                     try:
                         if selected_index is not None and self.downloads_table.row_count:
                             idx = max(0, min(selected_index, self.downloads_table.row_count - 1))
@@ -1100,11 +1134,28 @@ class DownloadManager(App):
                 self._throttled_save_state()
             except Exception:
                 pass
+            # Update inline status explanation for the selected row
+            try:
+                sel = self._get_selected_download()
+                if sel is not None:
+                    txt = self._explain_status(sel.get("status", ""))
+                    self.status_info.update(txt)
+                else:
+                    self.status_info.update("")
+            except Exception:
+                pass
+                # If Help panel is currently visible, refresh it so new errors show up
+            try:
+                if getattr(self.help_panel, 'visible', False):
+                    self.help_panel.update(self._build_help_text())
+            except Exception:
+                pass
         except Exception:
             logging.exception("[TermoLoad] sync_table_from_downloads failed")
 
     def on_button_pressed(self, event) -> None:
         
+        # Handle action buttons (non-navigation) - these don't change views
         if event.button.id == "btn_add":
             self.push_screen(AddDownloadModal())
             return
@@ -1182,36 +1233,44 @@ class DownloadManager(App):
             except Exception:
                 pass
 
-        try:
+        # Only hide/show panels if this is a navigation button
+        if event.button.id in ("btn_downloads", "btn_settings", "btn_logs", "btn_help"):
+            # First, hide ALL panels and widgets
             self.downloads_table.visible = False
             self.downloads_table.display = False
             self.downloads_toolbar.visible = False
             self.downloads_toolbar.display = False
-        except Exception:
-            pass
-        try:
+            self.no_downloads.visible = False
+            self.no_downloads.display = False
+            self.status_info.visible = False
+            self.status_info.display = False
             self.settings_panel.visible = False
             self.settings_panel.display = False
-        except Exception:
-            pass
-        try:
             self.logs_panel.visible = False
             self.logs_panel.display = False
-        except Exception:
-            pass
-        try:
             self.help_panel.visible = False
             self.help_panel.display = False
-        except Exception:
-            pass
 
         if event.button.id == "btn_downloads":
             try:
-                self.downloads_table.visible = True
-                self.downloads_table.display = True
                 if len(self.downloads) > 0:
+                    self.downloads_table.visible = True
+                    self.downloads_table.display = True
                     self.downloads_toolbar.visible = True
                     self.downloads_toolbar.display = True
+                    self.status_info.visible = True
+                    self.status_info.display = True
+                    self.no_downloads.visible = False
+                    self.no_downloads.display = False
+                else:
+                    self.no_downloads.visible = True
+                    self.no_downloads.display = True
+                    self.downloads_table.visible = False
+                    self.downloads_table.display = False
+                    self.downloads_toolbar.visible = False
+                    self.downloads_toolbar.display = False
+                    self.status_info.visible = False
+                    self.status_info.display = False
                 try:
                     self.downloads_table.focus()
                 except Exception:
@@ -1249,6 +1308,15 @@ class DownloadManager(App):
             try:
                 self.help_panel.visible = True
                 self.help_panel.display = True
+                try:
+                    self.help_panel.update(self._build_help_text())
+                except Exception:
+                    pass
+                # Hide status info when in Help view
+                try:
+                    self.status_info.update("")
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -1269,6 +1337,138 @@ class DownloadManager(App):
             return None
         except Exception:
             return None
+
+    def _build_help_text(self) -> str:
+        lines = []
+        lines.append("TermoLoad — Help / Reference\n")
+        lines.append("Controls\n--------")
+        lines.append("a  Add Download\nq  Quit\nArrow keys select rows on Downloads tab")
+        lines.append("")
+        lines.append("Common statuses\n----------------")
+        lines.append("Downloading  Transfer in progress\nPaused       Task paused or canceled\nQueued       Waiting to start\nCompleted    Finished successfully\nProcessing   Video post-processing (yt-dlp/ffmpeg)")
+        lines.append("")
+        # Dynamic error list collected from current downloads
+        try:
+            errs = self._collect_current_errors()
+        except Exception:
+            errs = []
+        lines.append("Recent errors (this session)\n----------------------------")
+        if not errs:
+            lines.append("No errors seen yet. If something fails, they will appear here.")
+        else:
+            grouped: Dict[str, List[str]] = {}
+            for eid, name, err_text, hint in errs:
+                key = f"{err_text}"
+                label = f"[ID {eid}] {name}"
+                grouped.setdefault(key, []).append(label)
+            for err_text, labels in grouped.items():
+                try:
+                    hint = self._explain_status(err_text)
+                    if hint and hint != err_text:
+                        lines.append(f"- {err_text} — {hint.split(' — ', 1)[-1]}")
+                    else:
+                        lines.append(f"- {err_text}")
+                except Exception:
+                    lines.append(f"- {err_text}")
+                try:
+                    lines.append(f"    Affected: {', '.join(labels)}")
+                except Exception:
+                    pass
+        lines.append("")
+        lines.append("Major HTTP error codes\n-----------------------")
+        codes = [
+            ("200 OK", "Download started successfully"),
+            ("206 Partial Content", "Server supports resume via HTTP Range (good)"),
+            ("301/302/307/308 Redirect", "URL moved; TermoLoad follows automatically"),
+            ("400 Bad Request", "Server rejected the request; check the URL"),
+            ("401 Unauthorized", "Authentication required; the URL needs credentials"),
+            ("403 Forbidden", "Access denied; you may not have permission"),
+            ("404 Not Found", "The file or page doesn’t exist"),
+            ("405 Method Not Allowed", "Server blocked the HTTP method"),
+            ("408 Request Timeout", "Connection too slow or interrupted; try again"),
+            ("409 Conflict", "Resource conflict; try later"),
+            ("410 Gone", "The resource was removed permanently"),
+            ("413 Payload Too Large", "Server refuses due to size or limits"),
+            ("414 URI Too Long", "The link is too long for the server"),
+            ("415 Unsupported Media Type", "Server rejected the content type"),
+            ("416 Range Not Satisfiable", "Resume offset invalid; TermoLoad deletes the partial and restarts"),
+            ("429 Too Many Requests", "You are rate-limited; wait and retry"),
+            ("451 Unavailable For Legal Reasons", "Blocked by region/legal restrictions"),
+            ("500 Internal Server Error", "Server error; retry later"),
+            ("501 Not Implemented", "Server doesn’t support the request"),
+            ("502 Bad Gateway", "Upstream server error"),
+            ("503 Service Unavailable", "Server overloaded or down; retry later"),
+            ("504 Gateway Timeout", "Upstream timeout; retry later"),
+        ]
+        for code, desc in codes:
+            lines.append(f"{code:<24} {desc}")
+        lines.append("")
+        lines.append("Video errors (yt-dlp)\n----------------------")
+        lines.append("- Error: yt-dlp not installed  → pip install yt-dlp\n- Merge/Processing issues       → install ffmpeg and ensure it’s in PATH\n- Some sites need cookies/login → not yet supported via UI; future work")
+        lines.append("")
+        lines.append("Where to look\n--------------")
+        lines.append("- Logs tab shows the last 20 lines\n- Full log file: termoload.log in the app folder\n- Download state is saved per-user: ~/downloads_state.json")
+        return "\n".join(lines)
+
+    def _collect_current_errors(self) -> List[tuple]:
+        """Collect a list of current error statuses from downloads.
+        Returns list of tuples: (id, name, status_text, hint_text)
+        Only includes entries where status starts with 'Error:'.
+        """
+        out: List[tuple] = []
+        try:
+            for d in getattr(self, 'downloads', []) or []:
+                st = str(d.get("status", "")).strip()
+                if st.startswith("Error:"):
+                    did = d.get("id")
+                    nm = d.get("name") or d.get("url") or f"download_{did}"
+                    hint = self._explain_status(st)
+                    out.append((did, nm, st, hint))
+        except Exception:
+            pass
+        return out
+
+    def _explain_status(self, status: str) -> str:
+        """Return one-line explanation for the given status string shown inline on Downloads tab."""
+        if not status:
+            return ""
+        s = status.strip()
+        if s.startswith("Error:"):
+            code = s.split(":", 1)[-1].strip()
+            mapping = {
+                "400": "Bad Request – The server rejected the request. Check the URL.",
+                "401": "Unauthorized – The URL requires authentication.",
+                "403": "Forbidden – You don't have permission.",
+                "404": "Not Found – The file or page doesn't exist.",
+                "405": "Method Not Allowed – Server blocked the HTTP method.",
+                "408": "Request Timeout – Connection was too slow or interrupted.",
+                "409": "Conflict – Resource state conflict; retry later.",
+                "410": "Gone – Resource removed permanently.",
+                "413": "Payload Too Large – File too big or server limits exceeded.",
+                "414": "URI Too Long – Link too long for the server.",
+                "415": "Unsupported Media Type – Server rejected the content type.",
+                "416": "Range Not Satisfiable – Resume offset invalid; TermoLoad restarts cleanly.",
+                "429": "Too Many Requests – You're rate-limited; wait and retry.",
+                "451": "Unavailable For Legal Reasons – Blocked by region/legal restrictions.",
+                "500": "Internal Server Error – Server failure; retry later.",
+                "501": "Not Implemented – Server doesn't support the request.",
+                "502": "Bad Gateway – Upstream server error.",
+                "503": "Service Unavailable – Server overloaded or down; retry later.",
+                "504": "Gateway Timeout – Upstream timeout; retry later.",
+            }
+            tips = mapping.get(code, "Unknown error – check logs for details.")
+            return f"{s} — {tips}"
+        elif s == "Processing":
+            return "Processing – Finishing up video merge (yt-dlp/ffmpeg)."
+        elif s == "Paused":
+            return "Paused – Use 'Resume Selected' to continue."
+        elif s == "Queued":
+            return "Queued – Waiting for a free slot to start."
+        elif s == "Downloading":
+            return "Downloading – Transfer in progress."
+        elif s == "Completed":
+            return "Completed – File is ready."
+        return s
 
     def _resolve_download_path(self, d: dict) -> Optional[Path]:
         """Resolve the final file path for a download entry.
@@ -1542,10 +1742,23 @@ class DownloadManager(App):
                         self.scroll_downloads_to_top()
                     except Exception:
                         pass
-                self.downloads_table.visible = True
-                self.settings_panel.visible = False
-                self.logs_panel.visible = False
-                self.help_panel.visible = False
+                try:
+                    self.downloads_table.visible = True
+                    self.downloads_table.display = True
+                    self.downloads_toolbar.visible = True
+                    self.downloads_toolbar.display = True
+                    self.status_info.visible = True
+                    self.status_info.display = True
+                    self.no_downloads.visible = False
+                    self.no_downloads.display = False
+                    self.settings_panel.visible = False
+                    self.settings_panel.display = False
+                    self.logs_panel.visible = False
+                    self.logs_panel.display = False
+                    self.help_panel.visible = False
+                    self.help_panel.display = False
+                except Exception:
+                    pass
                 if d_type == "URL":
                     logging.info(f"[TermoLoad] Queuing download {new_id} -> {url} -> {custom_path}")
                     try:
@@ -1704,11 +1917,22 @@ class DownloadManager(App):
                 self.scroll_downloads_to_top()
             except Exception:
                 pass
+            # Show Downloads tab
             try:
                 self.downloads_table.visible = True
+                self.downloads_table.display = True
+                self.downloads_toolbar.visible = True
+                self.downloads_toolbar.display = True
+                self.status_info.visible = True
+                self.status_info.display = True
+                self.no_downloads.visible = False
+                self.no_downloads.display = False
                 self.settings_panel.visible = False
+                self.settings_panel.display = False
                 self.logs_panel.visible = False
+                self.logs_panel.display = False
                 self.help_panel.visible = False
+                self.help_panel.display = False
             except Exception:
                 pass
 
@@ -1782,8 +2006,9 @@ class DownloadManager(App):
                 await asyncio.sleep(0)
         except Exception:
             logging.exception("[TermoLoad] _update_logs_panel failed")
+
     def _state_file(self) -> Path:
-        return Path("downloads_state.json")
+        return Path.home() / "downloads_state.json"
 
     def save_downloads_state(self, force: bool = False) -> None:
         try:
@@ -1814,7 +2039,17 @@ class DownloadManager(App):
     def load_downloads_state(self) -> List[Dict[str, Any]]:
         path = self._state_file()
         if not path.exists():
-            return []
+            # Backward compatibility: try legacy location in current working directory
+            legacy = Path("downloads_state.json")
+            if not legacy.exists():
+                return []
+            try:
+                with legacy.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("downloads", [])
+            except Exception:
+                logging.exception("[TermoLoad] Failed to read legacy downloads_state.json")
+                return []
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)

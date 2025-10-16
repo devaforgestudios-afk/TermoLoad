@@ -4,7 +4,8 @@ A powerful, terminal-based download manager built with Python and Textual. Termo
 
 ## ✨ Features
 
-- **📥 Multi-Protocol Support**: Download files via HTTP/HTTPS
+- **📥 Multi-Protocol Support**: Download files via HTTP/HTTPS and videos via yt-dlp
+- **🎬 YouTube & More (yt-dlp)**: Paste a YouTube (and many other sites) URL; downloads use the video title as the filename and merge best video+audio
 - **⚡ Concurrent Downloads**: Download multiple files simultaneously with configurable concurrency
 - **🎯 Speed Control**: Set download speed limits (KB/s)
 - **📊 Real-time Progress**: Live progress tracking with speed and ETA
@@ -14,22 +15,39 @@ A powerful, terminal-based download manager built with Python and Textual. Termo
 - **⚙️ Persistent Settings**: Save your preferences to `settings.json`
 - **🎨 Beautiful TUI**: Clean, modern terminal interface powered by Textual
 
-## 📋 Requirements
+## 📋 Requirements (For developers or contribution)
 
 - Python 3.8 or higher
 - Windows, macOS, or Linux
+- Optional for YouTube/video: yt-dlp (and ffmpeg for best results when merging audio/video)
 
 ## 🚀 Installation
 
-1. **Clone the repository**:
+1. **Clone the repository (For developers/contributions)**:
 ```bash
 git clone https://github.com/devaforgestudios-afk/TermoLoad.git
 cd TermoLoad
 ```
 
-2. **Install dependencies**:
+2. **Install dependencies (For developers/contributions)**:
 ```bash
-pip install textual aiohttp aiofiles
+pip install yt-dlp
+pip install textual
+pip install random
+pip install asyncio
+pip install aiohttp
+pip install aiofiles
+pip install os
+pip install pathlib
+pip install urllib
+pip install json
+pip install time
+pip install tkinter as tk
+pip install sys
+pip install subprocess
+pip install logging
+pip install collection
+pip install typing
 ```
 
 3. **Run the application**:
@@ -52,6 +70,23 @@ python app.py
 3. Specify the save folder (or leave empty for default)
 4. Click **Browse** to select a folder via dialog
 5. Click **Add** to start the download
+
+### Downloading YouTube or other videos (yt-dlp)
+
+- Paste a YouTube (or any yt-dlp-supported) URL in Add Download.
+- TermoLoad automatically routes it through yt-dlp and sets the filename to the actual video title.
+- The app uses best video + best audio with mp4 merge when possible.
+- Progress is shown with speed and ETA; after download, status briefly shows “Processing” while merging.
+
+Optional setup for best results:
+- Install yt-dlp: `pip install yt-dlp`
+- Install ffmpeg so yt-dlp can merge video+audio to mp4.
+  - Windows (winget): `winget install -e --id Gyan.FFmpeg`
+  - Or download from https://ffmpeg.org and add to PATH.
+
+Notes:
+- If yt-dlp isn’t installed, TermoLoad will show “Error: yt-dlp not installed” for video URLs and continue to work for normal HTTP/HTTPS downloads.
+- Some sites may require cookies/login; advanced yt-dlp options can be added in future versions.
 
 ### Navigating Tabs
 
@@ -95,10 +130,13 @@ Access settings via the **Settings** tab:
 TermoLoad/
 ├── app.py                  # Main application
 ├── settings.json           # Saved settings (auto-generated)
-├── downloads_state.json    # Saved downloads state (auto-generated)
+├── README.md               # This file
+└── downloads/              # Default download folder
+
+# State file is saved per-user:
+# Windows: C:\Users\<YourUser>\downloads_state.json
+# macOS/Linux: ~/downloads_state.json
 ├── termoload.log          # Application logs
-├── downloads/             # Default download folder
-└── README.md              # This file
 ```
 
 ## 🔧 Configuration File
@@ -117,7 +155,9 @@ Settings are automatically saved to `settings.json`:
 
 ### Downloads State File
 
-Active and past downloads are saved to `downloads_state.json` so progress is preserved across restarts. Example entry:
+Active and past downloads are saved per-user to `~/downloads_state.json` (Windows: `C:\Users\<You>\downloads_state.json`) so progress is preserved across restarts. For backward compatibility, the app will read a legacy `downloads_state.json` from the app folder if present.
+
+Example entry:
 
 ```json
 {
@@ -163,6 +203,9 @@ On startup, any entries not marked Completed or Error will automatically resume 
 - For actual shutdown, also enable "Allow real system shutdown"
 - ⚠️ Test with simulated mode first (default)
 
+### Merged file not mp4
+- Some sources provide formats that cannot be merged to mp4; yt-dlp may pick a different container. Installing ffmpeg helps produce mp4 when available.
+
 ## 🔒 Safety Features
 
 - **Simulated Shutdown by Default**: Logs "Shut down (simulated)" instead of actually shutting down
@@ -189,6 +232,7 @@ This project is open source and available under the MIT License.
 - Built with [Textual](https://github.com/Textualize/textual) - amazing TUI framework
 - Uses [aiohttp](https://github.com/aio-libs/aiohttp) for async HTTP requests
 - Uses [aiofiles](https://github.com/Tinche/aiofiles) for async file I/O
+- Video downloads powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org)
 
 ## 📧 Contact
 
