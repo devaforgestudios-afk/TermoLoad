@@ -1,3 +1,60 @@
 {
-  "downloads": []
+  "downloads": [
+    {
+      "id": 1,
+      "type": "Video",
+      "name": "watch.mp4",
+      "url": "https://www.youtube.com/watch?v=YE7VzlLtp-4",
+      "path": "downloads",
+      "progress": 1.0,
+      "speed": "0 B/s",
+      "status": "Completed",
+      "eta": "0s",
+      "downloaded_bytes": 1169303,
+      "total_size": 0,
+      "filepath": "downloads\\watch.mp4"
+    },
+    {
+      "id": 2,
+      "type": "URL",
+      "name": "dummy.pdf",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "path": "downloads",
+      "progress": 1.0,
+      "speed": "0 B/s",
+      "status": "Completed",
+      "eta": "0s",
+      "downloaded_bytes": 13264,
+      "total_size": 13264,
+      "filepath": "downloads\\dummy.pdf"
+    },
+    {
+      "id": 3,
+      "type": "URL",
+      "name": "dummy.pdf",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "path": "downloads",
+      "progress": 1.0,
+      "speed": "0 B/s",
+      "status": "Completed",
+      "eta": "0s",
+      "downloaded_bytes": 13264,
+      "total_size": 13264,
+      "filepath": "downloads\\dummy.pdf"
+    },
+    {
+      "id": 4,
+      "type": "URL",
+      "name": "dummy.pdf",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "path": "downloads",
+      "progress": 1.0,
+      "speed": "0 B/s",
+      "status": "Completed",
+      "eta": "0s",
+      "downloaded_bytes": 13264,
+      "total_size": 13264,
+      "filepath": "downloads\\dummy.pdf"
+    }
+  ]
 }

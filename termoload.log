@@ -74,3 +74,418 @@
 2025-10-15 21:46:42,849 [DEBUG] Using proactor: IocpProactor
 2025-10-15 21:46:58,053 [DEBUG] Using proactor: IocpProactor
 2025-10-15 22:27:57,967 [DEBUG] Using proactor: IocpProactor
+2025-10-16 09:57:04,938 [DEBUG] Using proactor: IocpProactor
+2025-10-16 09:57:08,475 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.youtube.com/watch?v=YE7VzlLtp-4 save_path=downloads
+2025-10-16 09:57:08,475 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.youtube.com/watch?v=YE7VzlLtp-4', 'path': 'downloads'}
+2025-10-16 09:57:08,475 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 1, 'type': 'Video', 'name': 'watch', 'url': 'https://www.youtube.com/watch?v=YE7VzlLtp-4', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-16 09:57:08,477 [INFO] [TermoLoad] process_modal_result: Queuing yt-dlp download 1 -> https://www.youtube.com/watch?v=YE7VzlLtp-4 -> downloads
+2025-10-16 09:57:08,477 [INFO] [TermoLoad] process_modal_result: Created asyncio task for yt-dlp download 1
+2025-10-16 09:57:08,541 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:09,039 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:09,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:10,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:10,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:11,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:11,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:12,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:12,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:13,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:13,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:14,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:14,569 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:15,065 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:15,621 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:16,133 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:16,597 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:17,078 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:17,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:18,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:18,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:19,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:19,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:20,025 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,025 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,025 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,026 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,036 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:20,050 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,070 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,109 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,143 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:20,179 [DEBUG] [TermoLoad] update progress id=1 1% status=Downloading
+2025-10-16 09:57:20,234 [DEBUG] [TermoLoad] update progress id=1 2% status=Downloading
+2025-10-16 09:57:20,314 [DEBUG] [TermoLoad] update progress id=1 5% status=Downloading
+2025-10-16 09:57:20,533 [DEBUG] [TermoLoad] update progress id=1 11% status=Downloading
+2025-10-16 09:57:20,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:21,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:21,402 [DEBUG] [TermoLoad] update progress id=1 22% status=Downloading
+2025-10-16 09:57:21,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:21,914 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,012 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,014 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,014 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,014 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,015 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,020 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:22,177 [DEBUG] [TermoLoad] update progress id=1 28% status=Downloading
+2025-10-16 09:57:22,214 [DEBUG] [TermoLoad] update progress id=1 29% status=Downloading
+2025-10-16 09:57:22,268 [DEBUG] [TermoLoad] update progress id=1 29% status=Downloading
+2025-10-16 09:57:22,388 [DEBUG] [TermoLoad] update progress id=1 31% status=Downloading
+2025-10-16 09:57:22,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:22,626 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:23,029 [DEBUG] [TermoLoad] update progress id=1 39% status=Downloading
+2025-10-16 09:57:23,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:23,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:23,864 [DEBUG] [TermoLoad] update progress id=1 51% status=Downloading
+2025-10-16 09:57:24,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:24,205 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,299 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,299 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,300 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,300 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,303 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,309 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,339 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,368 [DEBUG] [TermoLoad] update progress id=1 57% status=Downloading
+2025-10-16 09:57:24,429 [DEBUG] [TermoLoad] update progress id=1 58% status=Downloading
+2025-10-16 09:57:24,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:24,579 [DEBUG] [TermoLoad] update progress id=1 59% status=Downloading
+2025-10-16 09:57:24,821 [DEBUG] [TermoLoad] update progress id=1 62% status=Downloading
+2025-10-16 09:57:25,046 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:25,440 [DEBUG] [TermoLoad] update progress id=1 68% status=Downloading
+2025-10-16 09:57:25,543 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:26,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:26,450 [DEBUG] [TermoLoad] update progress id=1 77% status=Downloading
+2025-10-16 09:57:26,537 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:27,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:27,257 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,353 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,353 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,353 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,353 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,357 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,367 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,387 [DEBUG] [TermoLoad] update progress id=1 85% status=Downloading
+2025-10-16 09:57:27,425 [DEBUG] [TermoLoad] update progress id=1 86% status=Downloading
+2025-10-16 09:57:27,507 [DEBUG] [TermoLoad] update progress id=1 86% status=Downloading
+2025-10-16 09:57:27,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:27,661 [DEBUG] [TermoLoad] update progress id=1 88% status=Downloading
+2025-10-16 09:57:27,985 [DEBUG] [TermoLoad] update progress id=1 91% status=Downloading
+2025-10-16 09:57:28,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:28,482 [DEBUG] [TermoLoad] update progress id=1 96% status=Downloading
+2025-10-16 09:57:28,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:28,693 [DEBUG] [TermoLoad] update progress id=1 100% status=Downloading
+2025-10-16 09:57:28,694 [DEBUG] [TermoLoad] update progress id=1 100% status=Processing
+2025-10-16 09:57:29,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,209 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,209 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,211 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,223 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,245 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:57:29,282 [DEBUG] [TermoLoad] update progress id=1 1% status=Downloading
+2025-10-16 09:57:29,358 [DEBUG] [TermoLoad] update progress id=1 3% status=Downloading
+2025-10-16 09:57:29,502 [DEBUG] [TermoLoad] update progress id=1 7% status=Downloading
+2025-10-16 09:57:29,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:29,739 [DEBUG] [TermoLoad] update progress id=1 14% status=Downloading
+2025-10-16 09:57:30,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:30,536 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:30,587 [DEBUG] [TermoLoad] update progress id=1 29% status=Downloading
+2025-10-16 09:57:31,005 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:31,199 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,199 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,201 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,201 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,201 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,202 [DEBUG] [TermoLoad] update progress id=1 34% status=Downloading
+2025-10-16 09:57:31,202 [DEBUG] [TermoLoad] update progress id=1 35% status=Downloading
+2025-10-16 09:57:31,210 [DEBUG] [TermoLoad] update progress id=1 35% status=Downloading
+2025-10-16 09:57:31,270 [DEBUG] [TermoLoad] update progress id=1 36% status=Downloading
+2025-10-16 09:57:31,390 [DEBUG] [TermoLoad] update progress id=1 38% status=Downloading
+2025-10-16 09:57:31,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:31,629 [DEBUG] [TermoLoad] update progress id=1 41% status=Downloading
+2025-10-16 09:57:32,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:32,114 [DEBUG] [TermoLoad] update progress id=1 49% status=Downloading
+2025-10-16 09:57:32,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:32,879 [DEBUG] [TermoLoad] update progress id=1 63% status=Downloading
+2025-10-16 09:57:33,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:33,272 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,363 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,363 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,365 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,365 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,366 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,369 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,379 [DEBUG] [TermoLoad] update progress id=1 70% status=Downloading
+2025-10-16 09:57:33,433 [DEBUG] [TermoLoad] update progress id=1 71% status=Downloading
+2025-10-16 09:57:33,446 [DEBUG] [TermoLoad] update progress id=1 72% status=Downloading
+2025-10-16 09:57:33,517 [DEBUG] [TermoLoad] update progress id=1 74% status=Downloading
+2025-10-16 09:57:33,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:33,903 [DEBUG] [TermoLoad] update progress id=1 77% status=Downloading
+2025-10-16 09:57:34,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:34,193 [DEBUG] [TermoLoad] update progress id=1 84% status=Downloading
+2025-10-16 09:57:34,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:35,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:57:35,374 [DEBUG] [TermoLoad] update progress id=1 99% status=Downloading
+2025-10-16 09:57:35,407 [DEBUG] [TermoLoad] update progress id=1 100% status=Downloading
+2025-10-16 09:57:35,407 [DEBUG] [TermoLoad] update progress id=1 100% status=Processing
+2025-10-16 09:57:35,682 [DEBUG] [TermoLoad] update progress id=1 100% status=Completed
+2025-10-16 09:57:36,035 [INFO] [TermoLoad] maybe_trigger_shutdown: All downloads completed, initiating shutdown
+2025-10-16 09:57:36,035 [INFO] [TermoLoad] DEBUG: Shut down (simulated)
+2025-10-16 09:59:05,362 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf save_path=downloads
+2025-10-16 09:59:05,362 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads'}
+2025-10-16 09:59:05,362 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 2, 'type': 'URL', 'name': 'dummy.pdf', 'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-16 09:59:05,363 [INFO] [TermoLoad] process_modal_result: Queuing download 2 -> https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -> downloads
+2025-10-16 09:59:05,363 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 2
+2025-10-16 09:59:05,365 [INFO] [TermoLoad] Starting download_file id=2 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 09:59:05,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:59:06,036 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:59:06,512 [DEBUG] [TermoLoad] update progress id=2 0% status=Error:416
+2025-10-16 09:59:10,655 [INFO] [TermoLoad] Starting download_file id=1 url=https://www.youtube.com/watch?v=YE7VzlLtp-4 path=downloads
+2025-10-16 09:59:10,657 [INFO] [TermoLoad] Starting download_file id=2 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 09:59:11,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (2)
+2025-10-16 09:59:11,228 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,231 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,242 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,262 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,283 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,284 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,295 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,304 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,307 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,318 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,323 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,329 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,333 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,339 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,345 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,349 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,355 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,360 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,360 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,366 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,371 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,378 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,379 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,380 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,387 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,389 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,392 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,395 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,397 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,399 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,401 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,401 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,405 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,407 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,408 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,412 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,414 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,416 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,418 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,421 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,421 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,421 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,424 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,426 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,429 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,431 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,433 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,434 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,435 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,438 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,438 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,443 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,443 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,445 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,446 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,447 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,448 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,450 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,452 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,453 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,455 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,457 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,457 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,458 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,460 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,461 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,462 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,464 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,464 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,465 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,466 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,468 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,468 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,469 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,471 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,471 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,472 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,473 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,474 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,476 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,476 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,478 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,478 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,479 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,479 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,481 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,481 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,482 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,482 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,482 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,484 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,485 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,486 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,487 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,487 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,488 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,489 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,491 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,491 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,492 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,493 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,494 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,494 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,494 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,496 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,496 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,498 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,498 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,500 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,501 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,501 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,503 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,503 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,503 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,504 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,505 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,505 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,506 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,507 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,507 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,509 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,510 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,510 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,512 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,512 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,515 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:11,535 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (2)
+2025-10-16 09:59:11,580 [DEBUG] [TermoLoad] update progress id=2 0% status=Error:416
+2025-10-16 09:59:12,035 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 09:59:12,171 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,173 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,173 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,174 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,174 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,175 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,176 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,177 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,177 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,180 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,180 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,190 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,194 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,194 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,196 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,196 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,196 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,197 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,197 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,199 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,200 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,201 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,201 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,202 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,202 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,202 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,205 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,207 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,208 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,211 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,211 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,213 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,215 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,221 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,240 [DEBUG] [TermoLoad] update progress id=1 0% status=Downloading
+2025-10-16 09:59:12,241 [DEBUG] [TermoLoad] update progress id=1 100% status=Completed
+2025-10-16 10:15:28,505 [DEBUG] Using proactor: IocpProactor
+2025-10-16 10:15:28,674 [INFO] [TermoLoad] Starting download_file id=2 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 10:15:29,176 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 10:15:29,272 [DEBUG] [TermoLoad] update progress id=2 0% status=Error:416
+2025-10-16 10:15:35,014 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf save_path=downloads
+2025-10-16 10:15:35,014 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads'}
+2025-10-16 10:15:35,014 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 3, 'type': 'URL', 'name': 'dummy.pdf', 'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-16 10:15:35,017 [INFO] [TermoLoad] process_modal_result: Queuing download 3 -> https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -> downloads
+2025-10-16 10:15:35,017 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 3
+2025-10-16 10:15:35,021 [INFO] [TermoLoad] Starting download_file id=3 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 10:15:35,175 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 10:15:35,452 [DEBUG] [TermoLoad] update progress id=3 0% status=Error:416
+2025-10-16 10:40:02,511 [DEBUG] Using proactor: IocpProactor
+2025-10-16 10:40:02,626 [INFO] [TermoLoad] Starting download_file id=2 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 10:40:02,627 [INFO] [TermoLoad] Starting download_file id=3 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 10:40:03,109 [DEBUG] [TermoLoad] update progress id=2 100% status=Completed
+2025-10-16 10:40:03,122 [DEBUG] [TermoLoad] update progress id=3 100% status=Completed
+2025-10-16 10:40:03,127 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:03,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:04,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:04,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:05,135 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:05,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:06,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:06,627 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:07,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:07,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:08,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:08,625 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:09,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:09,633 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:10,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:10,625 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:11,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:11,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:12,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:12,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:13,127 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:13,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:14,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:14,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:15,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:15,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:16,127 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:16,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:17,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:17,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:18,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:18,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:19,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:19,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:20,125 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:20,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:21,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:21,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:22,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:22,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:23,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:23,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:24,126 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:24,627 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:25,162 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:25,626 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:26,125 [DEBUG] [TermoLoad] maybe_trigger_shutdown: all downloads completed but no earlier activity seen; skipping
+2025-10-16 10:40:26,326 [INFO] [TermoLoad] AddDownloadModal: user entered url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf save_path=downloads
+2025-10-16 10:40:26,327 [INFO] [TermoLoad] process_modal_result called with: {'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads'}
+2025-10-16 10:40:26,327 [INFO] [TermoLoad] process_modal_result: appending new_entry {'id': 4, 'type': 'URL', 'name': 'dummy.pdf', 'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', 'path': 'downloads', 'progress': 0.0, 'speed': '0 B/s', 'status': 'Queued', 'eta': '--'}
+2025-10-16 10:40:26,328 [INFO] [TermoLoad] process_modal_result: Queuing download 4 -> https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -> downloads
+2025-10-16 10:40:26,328 [INFO] [TermoLoad] process_modal_result: Created asyncio task for download 4
+2025-10-16 10:40:26,329 [INFO] [TermoLoad] Starting download_file id=4 url=https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf path=downloads
+2025-10-16 10:40:26,627 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 10:40:27,126 [INFO] [TermoLoad] maybe_trigger_shutdown: active downloads remain, not shutting down (1)
+2025-10-16 10:40:27,267 [DEBUG] [TermoLoad] update progress id=4 100% status=Completed
+2025-10-16 10:40:27,625 [INFO] [TermoLoad] maybe_trigger_shutdown: All downloads completed, initiating shutdown
+2025-10-16 10:40:27,626 [INFO] [TermoLoad] DEBUG: Shut down (simulated)

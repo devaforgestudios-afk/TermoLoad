@@ -18,6 +18,10 @@ import subprocess
 import logging
 from collections import deque
 from typing import Optional, Dict, Any, List
+try:
+    import yt_dlp as ytdlp
+except Exception:
+    ytdlp = None
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -52,8 +56,115 @@ class RealDownloader:
                 connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300)
             except Exception:
                 connector = None
-            self.session = aiohttp.ClientSession(connector=connector) if connector else aiohttp.ClientSession()
+            default_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36 TermoLoad/1.0",
+                "Accept": "*/*",
+            }
+            self.session = (
+                aiohttp.ClientSession(connector=connector, headers=default_headers)
+                if connector
+                else aiohttp.ClientSession(headers=default_headers)
+            )
 
+    
+
+    async def download_with_ytdlp(self,url:str,download_id:int, custom_path: str, filename:str | None = None, audio_only:bool = False, ytdlp_format:str | None = None)->bool:
+        if ytdlp is None:
+            self.update_download_progress(download_id, 0.0, 0, 0, "Error: yt-dlp not installed")
+            logging.error("[TermoLoad] yt-dlp not installed, cannot download video URLs")
+            return False
+        try:
+            Path(custom_path or "downloads").mkdir(parents=True, exist_ok=True)
+            if filename:
+                outtmpl = str((Path(custom_path)/filename).with_suffix(".%(ext)s"))
+            else:
+                # Let yt-dlp use the actual video title
+                outtmpl = str(Path(custom_path)/"%(title)s.%(ext)s")
+            
+            def _hook(d: dict):
+                status = d.get("status")
+                if status == "downloading":
+                    downloaded = int(d.get("downloaded_bytes") or 0)
+                    total = int(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
+                    speed = float(d.get("speed") or 0)
+                    eta = float(d.get("eta") or 0)
+                    progress = (downloaded / total) if total else 0.0
+                    try:
+                        item = next((x for x in self.app.downloads if x.get("id") == download_id), None)
+                        if item is not None:
+                            item["downloaded_bytes"] = downloaded
+                            if total:
+                                item["total_size"] = total
+                    except Exception:
+                        pass
+                    self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+
+                elif status == "finished":
+                    self.update_download_progress(download_id,1.0,0,0, "Processing")
+                        
+            ytdlp_opts = {
+                "outtmpl": outtmpl,
+                "noprogress": True,
+                "progress_hooks": [_hook],
+                "continuedl": True,
+                "retries" : 5,
+                "ignoreerrors": True,
+                "concurrent_fragment_downloads": 5,
+            }
+            if audio_only:
+                ytdlp_opts["format"] = "bestaudio/best"
+                ytdlp_opts["postprocessors"] = [
+                    {"key":"FFmpegExtractAudio","preferredcodec":"mp3","preferredquality":"192"}
+                    ]
+            else:
+                ytdlp_opts["format"] = ytdlp_format or "bestvideo+bestaudio/best"
+                ytdlp_opts["merge_output_format"] = "mp4"
+            
+            def _run():
+                with ytdlp.YoutubeDL(ytdlp_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    try:
+                        final_path = info.get("requested_downloads", [{}])[0].get("filepath") or info.get("filepath")
+                        if final_path:
+                            for item in self.app.downloads:
+                                if item.get("id") == download_id:
+                                    item["filepath"] = final_path
+                                    try:
+                                        item["name"] = os.path.basename(final_path)
+                                    except Exception:
+                                        pass
+                                    break
+                    except Exception:
+                        pass
+            
+            await asyncio.to_thread(_run)
+            self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+            try:
+                self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return True
+        except asyncio.CancelledError:
+            try:
+                d = next((x for x in self.app.downloads if x.get("id") == download_id),None)
+                if d:
+                    total = int(d.get("total_size") or 0)
+                    done = int(d.get("downloaded_bytes") or 0)
+                    progress = (done / total) if total else d.get("progress", 0.0)
+                    self.update_download_progress(download_id, progress, 0, 0, "Paused")
+                    self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return False
+        except Exception as e:
+            logging.exception(f"[TermoLoad] download_with_ytdlp exception id={download_id}: {e}")
+            self.update_download_progress(download_id, 0, 0, 0, f"Error:{str(e)}")
+            try:
+                self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return False
+   
     async def close_session(self):
         if self.session:
             await self.session.close()
@@ -110,6 +221,252 @@ class RealDownloader:
                             filepath.unlink(missing_ok=True)
                         except Exception:
                             pass
+                elif status == 416:
+                    # Range Not Satisfiable: check if our local file is already complete or invalid
+                    try:
+                        cr = response.headers.get("content-range") or response.headers.get("Content-Range")
+                        total_len = None
+                        if cr and "/" in cr:
+                            length_part = cr.split("/")[-1].strip()
+                            if length_part.isdigit():
+                                total_len = int(length_part)
+                    except Exception:
+                        total_len = None
+
+                    if total_len is not None and existing_size == total_len and total_len > 0:
+                        # Our local file already has the full size; mark as completed
+                        try:
+                            for d in self.app.downloads:
+                                if d.get("id") == download_id:
+                                    d["filepath"] = str(filepath)
+                                    d["total_size"] = total_len
+                                    d["downloaded_bytes"] = total_len
+                                    break
+                        except Exception:
+                            pass
+                        self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                        try:
+                            self.app.save_downloads_state(force=True)
+                        except Exception:
+                            pass
+                        return True
+
+                    # Otherwise, remove the partial (or truncate) and retry once
+                    try:
+                        if filepath.exists():
+                            filepath.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    # First retry with an explicit Range: bytes=0- (some servers prefer this over no-Range)
+                    async with self.session.get(url, headers={"Range": "bytes=0-"}) as r2:
+                        if r2.status == 200:
+                            total_size = int(r2.headers.get('content-length', 0)) or None
+                            open_mode = 'wb'
+                            downloaded = 0
+                            # proceed to stream below using r2
+                            try:
+                                for d in self.app.downloads:
+                                    if d.get("id") == download_id:
+                                        d["filepath"] = str(filepath)
+                                        d["total_size"] = total_size if total_size is not None else 0
+                                        d["downloaded_bytes"] = downloaded
+                                        d["status"] = "Downloading"
+                                        break
+                            except Exception:
+                                pass
+
+                            start_time = time.time()
+                            chunk_size = 256 * 1024
+                            ema_speed = None
+                            ema_alpha = 0.2
+                            last_t = start_time
+                            bytes_window = 0
+                            async with aiofiles.open(filepath, open_mode) as file:
+                                idx = 0
+                                async for chunk in r2.content.iter_chunked(chunk_size):
+                                    if not chunk:
+                                        await asyncio.sleep(0)
+                                        continue
+                                    await file.write(chunk)
+                                    downloaded += len(chunk)
+                                    bytes_window += len(chunk)
+
+                                    progress = (downloaded / total_size) if (total_size and total_size > 0) else 0
+                                    now = time.time()
+                                    dt = now - last_t
+                                    inst_speed = (bytes_window / dt) if dt > 0 else 0
+                                    bytes_window = 0
+                                    last_t = now
+                                    if ema_speed is None:
+                                        ema_speed = inst_speed
+                                    else:
+                                        ema_speed = ema_alpha * inst_speed + (1 - ema_alpha) * ema_speed
+                                    speed = ema_speed or 0
+                                    eta = ((total_size - downloaded) / speed) if (total_size and speed > 0) else 0
+                                    try:
+                                        for d in self.app.downloads:
+                                            if d.get("id") == download_id:
+                                                d["downloaded_bytes"] = downloaded
+                                                if total_size:
+                                                    d["total_size"] = total_size
+                                                d["_smoothed_bps"] = speed
+                                                break
+                                    except Exception:
+                                        pass
+
+                                    self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+                                    idx += 1
+                                    if (idx % 8) == 0:
+                                        await asyncio.sleep(0)
+
+                            if total_size and downloaded >= total_size:
+                                self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                            else:
+                                self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                            try:
+                                self.app.save_downloads_state(force=True)
+                            except Exception:
+                                pass
+                            return True
+                        elif r2.status == 206:
+                            # 206 with bytes=0-; treat same as full restart
+                            total_size = int(r2.headers.get('content-length', 0)) or None
+                            open_mode = 'wb'
+                            downloaded = 0
+                            try:
+                                for d in self.app.downloads:
+                                    if d.get("id") == download_id:
+                                        d["filepath"] = str(filepath)
+                                        d["total_size"] = total_size if total_size is not None else 0
+                                        d["downloaded_bytes"] = downloaded
+                                        d["status"] = "Downloading"
+                                        break
+                            except Exception:
+                                pass
+                            start_time = time.time()
+                            chunk_size = 256 * 1024
+                            ema_speed = None
+                            ema_alpha = 0.2
+                            last_t = start_time
+                            bytes_window = 0
+                            async with aiofiles.open(filepath, open_mode) as file:
+                                idx = 0
+                                async for chunk in r2.content.iter_chunked(chunk_size):
+                                    if not chunk:
+                                        await asyncio.sleep(0)
+                                        continue
+                                    await file.write(chunk)
+                                    downloaded += len(chunk)
+                                    bytes_window += len(chunk)
+                                    progress = (downloaded / total_size) if (total_size and total_size > 0) else 0
+                                    now = time.time()
+                                    dt = now - last_t
+                                    inst_speed = (bytes_window / dt) if dt > 0 else 0
+                                    bytes_window = 0
+                                    last_t = now
+                                    if ema_speed is None:
+                                        ema_speed = inst_speed
+                                    else:
+                                        ema_speed = ema_alpha * inst_speed + (1 - ema_alpha) * ema_speed
+                                    speed = ema_speed or 0
+                                    eta = ((total_size - downloaded) / speed) if (total_size and speed > 0) else 0
+                                    try:
+                                        for d in self.app.downloads:
+                                            if d.get("id") == download_id:
+                                                d["downloaded_bytes"] = downloaded
+                                                if total_size:
+                                                    d["total_size"] = total_size
+                                                d["_smoothed_bps"] = speed
+                                                break
+                                    except Exception:
+                                        pass
+                                    self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+                                    idx += 1
+                                    if (idx % 8) == 0:
+                                        await asyncio.sleep(0)
+                            if total_size and downloaded >= total_size:
+                                self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                            else:
+                                self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                            try:
+                                self.app.save_downloads_state(force=True)
+                            except Exception:
+                                pass
+                            return True
+                        else:
+                            # Final fallback: plain GET without Range
+                            async with self.session.get(url) as r3:
+                                if r3.status == 200:
+                                    total_size = int(r3.headers.get('content-length', 0)) or None
+                                    open_mode = 'wb'
+                                    downloaded = 0
+                                    try:
+                                        for d in self.app.downloads:
+                                            if d.get("id") == download_id:
+                                                d["filepath"] = str(filepath)
+                                                d["total_size"] = total_size if total_size is not None else 0
+                                                d["downloaded_bytes"] = downloaded
+                                                d["status"] = "Downloading"
+                                                break
+                                    except Exception:
+                                        pass
+                                    start_time = time.time()
+                                    chunk_size = 256 * 1024
+                                    ema_speed = None
+                                    ema_alpha = 0.2
+                                    last_t = start_time
+                                    bytes_window = 0
+                                    async with aiofiles.open(filepath, open_mode) as file:
+                                        idx = 0
+                                        async for chunk in r3.content.iter_chunked(chunk_size):
+                                            if not chunk:
+                                                await asyncio.sleep(0)
+                                                continue
+                                            await file.write(chunk)
+                                            downloaded += len(chunk)
+                                            bytes_window += len(chunk)
+                                            progress = (downloaded / total_size) if (total_size and total_size > 0) else 0
+                                            now = time.time()
+                                            dt = now - last_t
+                                            inst_speed = (bytes_window / dt) if dt > 0 else 0
+                                            bytes_window = 0
+                                            last_t = now
+                                            if ema_speed is None:
+                                                ema_speed = inst_speed
+                                            else:
+                                                ema_speed = ema_alpha * inst_speed + (1 - ema_alpha) * ema_speed
+                                            speed = ema_speed or 0
+                                            eta = ((total_size - downloaded) / speed) if (total_size and speed > 0) else 0
+                                            try:
+                                                for d in self.app.downloads:
+                                                    if d.get("id") == download_id:
+                                                        d["downloaded_bytes"] = downloaded
+                                                        if total_size:
+                                                            d["total_size"] = total_size
+                                                        d["_smoothed_bps"] = speed
+                                                        break
+                                            except Exception:
+                                                pass
+                                            self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+                                            idx += 1
+                                            if (idx % 8) == 0:
+                                                await asyncio.sleep(0)
+                                    if total_size and downloaded >= total_size:
+                                        self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                                    else:
+                                        self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                                    try:
+                                        self.app.save_downloads_state(force=True)
+                                    except Exception:
+                                        pass
+                                    return True
+                                else:
+                                    self.update_download_progress(download_id, 0.0, 0, 0, f"Error:{r3.status}")
+                                    try:
+                                        self.app.save_downloads_state(force=True)
+                                    except Exception:
+                                        pass
+                                    return False
                 else:
                     self.update_download_progress(download_id, 0.0, 0, 0, f"Error:{status}")
                     try:
@@ -239,7 +596,14 @@ class RealDownloader:
             return f"{int(seconds//60)}m {int(seconds%60)}s"
         else:
             return f"{int(seconds//3600)}h {int((seconds%3600)//60)}m"
-
+        
+    @staticmethod
+    def is_video_url(url: str) -> bool:
+        try:
+            host = urlparse(url).netloc.lower()
+            return any(h in host for h in ("youtube.com", "youtu.be", "m.youtube.com", "youtube-nocookie.com"))
+        except Exception:
+            return False
 
 class AddDownloadModal(ModalScreen[dict]):
     def compose(self) -> ComposeResult:
@@ -590,8 +954,8 @@ class DownloadManager(App):
             for i, d in enumerate(self.downloads):
                 try:
                     row_key = d.get("row_key", i)
-                    # Progress: two-decimal percent + bytes if available
-                    prog = float(d.get('progress', 0) or 0)
+                    # Progress: ASCII bar + two-decimal percent + bytes if available
+                    prog = max(0.0, min(1.0, float(d.get('progress', 0) or 0)))
                     pct = f"{prog*100:.2f}%"
                     dl = int(d.get('downloaded_bytes', 0) or 0)
                     total = int(d.get('total_size', 0) or 0)
@@ -604,8 +968,11 @@ class DownloadManager(App):
                             return f"{n/(1024**2):.1f} MB"
                         else:
                             return f"{n/(1024**3):.1f} GB"
+                    bar_w = 20
+                    filled = int(round(prog * bar_w))
+                    bar = f"[{('#'*filled).ljust(bar_w, '-')}]"
                     bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
-                    self.downloads_table.update_cell(row_key, 3, pct + bytes_txt)
+                    self.downloads_table.update_cell(row_key, 3, f"{bar} {pct}{bytes_txt}")
                     self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
                     self.downloads_table.update_cell(row_key, 5, d.get('status', 'Queued'))
                     self.downloads_table.update_cell(row_key, 6, d.get('eta', '--'))
@@ -626,7 +993,7 @@ class DownloadManager(App):
 
                     for d in self.downloads:
                         try:
-                            prog = float(d.get('progress', 0) or 0)
+                            prog = max(0.0, min(1.0, float(d.get('progress', 0) or 0)))
                             pct = f"{prog*100:.2f}%"
                             dl = int(d.get('downloaded_bytes', 0) or 0)
                             total = int(d.get('total_size', 0) or 0)
@@ -639,12 +1006,15 @@ class DownloadManager(App):
                                     return f"{n/(1024**2):.1f} MB"
                                 else:
                                     return f"{n/(1024**3):.1f} GB"
+                            bar_w = 20
+                            filled = int(round(prog * bar_w))
+                            bar = f"[{('#'*filled).ljust(bar_w, '-')}]"
                             bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
                             rk = self.downloads_table.add_row(
                                 str(d.get("id")),
                                 d.get("type", ""),
                                 d.get("name", ""),
-                                pct + bytes_txt,
+                                f"{bar} {pct}{bytes_txt}",
                                 d.get('speed', '0 B/s'),
                                 d.get('status', 'Queued'),
                                 d.get('eta', '--')
@@ -928,6 +1298,12 @@ class DownloadManager(App):
                 logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
                 new_id = len(self.downloads) + 1
                 d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
+                # upgrade to Video for known video sites (YouTube)
+                try:
+                    if d_type == "URL" and RealDownloader.is_video_url(url):
+                        d_type = "Video"
+                except Exception:
+                    pass
                 if url.startswith(("http://", "https://")):
                     name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
                 else:
@@ -995,7 +1371,26 @@ class DownloadManager(App):
                         logging.info(f"[TermoLoad] Created asyncio task for download {new_id}")
                     except Exception as ex:
                         logging.exception(f"[TermoLoad] Failed to create task: {ex}")
+                elif d_type == "Video":
+                    logging.info(f"[TermoLoad] Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
+                    try:
+                        # Set a placeholder name until yt-dlp determines title; it will update item["name"]
+                        try:
+                            for item in self.downloads:
+                                if item.get("id") == new_id:
+                                    item["name"] = item.get("name") or "(resolving title...)"
+                                    break
+                        except Exception:
+                            pass
+                        task = asyncio.create_task(
+                            self.downloader.download_with_ytdlp(url, new_id, custom_path, None)
+                        )
+                        self.download_tasks[new_id] = task
+                        logging.info(f"[TermoLoad] Created asyncio task for yt-dlp download {new_id}")
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] Failed to create yt-dlp task: {ex}")
 
+    
     def scroll_downloads_to_top(self) -> None:
         try:
             if hasattr(self, 'downloads_table'):
@@ -1068,7 +1463,6 @@ class DownloadManager(App):
     
     
     def process_modal_result(self, result: dict):
-        """Process the modal result immediately. This helps when on_screen_dismissed isn't emitted in some environments."""
         try:
             logging.info(f"[TermoLoad] process_modal_result called with: {result}")
             if not result or not isinstance(result, dict):
@@ -1080,6 +1474,12 @@ class DownloadManager(App):
 
             new_id = len(self.downloads) + 1
             d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
+            # upgrade to Video when applicable
+            try:
+                if d_type == "URL" and RealDownloader.is_video_url(url):
+                    d_type = "Video"
+            except Exception:
+                pass
             if url.startswith(("http://", "https://")):
                 name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
             else:
@@ -1140,6 +1540,24 @@ class DownloadManager(App):
                     logging.info(f"[TermoLoad] process_modal_result: Created asyncio task for download {new_id}")
                 except Exception as ex:
                     logging.exception(f"[TermoLoad] process_modal_result: Failed to create task: {ex}")
+            elif d_type == "Video":
+                logging.info(f"[TermoLoad] process_modal_result: Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
+                try:
+                    # Placeholder name until yt-dlp sets the actual title-based name
+                    try:
+                        for item in self.downloads:
+                            if item.get("id") == new_id:
+                                item["name"] = item.get("name") or "(resolving title...)"
+                                break
+                    except Exception:
+                        pass
+                    task = asyncio.create_task(
+                        self.downloader.download_with_ytdlp(url, new_id, custom_path, None)
+                    )
+                    self.download_tasks[new_id] = task
+                    logging.info(f"[TermoLoad] process_modal_result: Created asyncio task for yt-dlp download {new_id}")
+                except Exception as ex:
+                    logging.exception(f"[TermoLoad] process_modal_result: Failed to create yt-dlp task: {ex}")
         except Exception:
             logging.exception("[TermoLoad] process_modal_result: unexpected error")
 
