@@ -14,6 +14,9 @@ A powerful, terminal-based download manager built with Python and Textual. Termo
 - **📋 Logs**: Built-in logging with file and in-app log viewer (last 20 lines)
 - **⚙️ Persistent Settings**: Save your preferences to `settings.json`
 - **🎨 Beautiful TUI**: Clean, modern terminal interface powered by Textual
+- **System Tray Support**: Minimize to Windows system tray (press 'm' or click Minimize button)
+  - Right-click tray icon to show/hide or check active downloads
+  - Downloads continue in the background
 
 ## 📋 Requirements (For developers or contribution)
 

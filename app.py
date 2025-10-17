@@ -1,10 +1,12 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, DataTable, Static, Button ,Input, Label
-from textual.containers import Container, Horizontal ,  Vertical
+from textual.widgets import Header, Footer, DataTable, Static, Button, Input, Label, Checkbox
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 import random
 import asyncio
 import aiohttp
+import threading
+from PIL import Image, ImageDraw
 import aiofiles
 import os
 from pathlib import Path
@@ -13,6 +15,7 @@ import json
 import time
 import tkinter as tk
 import tkinter.filedialog
+import pystray
 import sys
 import subprocess
 import logging
@@ -23,11 +26,14 @@ try:
 except Exception:
     ytdlp = None
 
+# Set log file path to user's home directory
+LOG_FILE_PATH = Path.home() / "termoload.log"
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('termoload.log', encoding='utf-8')
+        logging.FileHandler(str(LOG_FILE_PATH), encoding='utf-8')
     ]
 )
 
@@ -48,8 +54,15 @@ logging.getLogger().addHandler(buffer_handler)
 
 class RealDownloader:
     def __init__(self,app_instance):
+        super().__init__()
+        self.downloader = RealDownloader(self)
+        self.download_tasks = {}
+        self.tray_icon = None
+        self.tray_thread = None
+        self.minimized_to_tray = False
         self.app = app_instance
         self.session = None
+
     async def start_session(self):
         if not self.session:
             try:
@@ -597,7 +610,7 @@ class RealDownloader:
             return any(h in host for h in ("youtube.com", "youtu.be", "m.youtube.com", "youtube-nocookie.com"))
         except Exception:
             return False
-
+    
 class AddDownloadModal(ModalScreen[dict]):
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
@@ -703,7 +716,7 @@ class PathSelectModel(ModalScreen[str]):
             except:
                 pass
 class TermoLoad(App):
-    BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download")]
+    BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download"),("m","minimize_to_tray","Minimize to Tray")]
 
     CSS = """
     AddDownloadModal {
@@ -712,7 +725,7 @@ class TermoLoad(App):
     
     #modal_container{
         width: 45%;
-        height: 55%;
+        height: 70%;
         min-height: 12;
         background: $surface;
         border: thick $primary;
@@ -767,6 +780,31 @@ class TermoLoad(App):
         margin-right: 1;
         background: $boost;
     }
+    #settings_panel Checkbox{
+        margin: 1 0;
+        padding: 0 1;
+    }
+    #settings_panel > Horizontal:last-child {
+        margin-top: 2;
+        padding-top: 1;
+        border-top: solid $primary;
+    }
+    /* Modal browse buttons - highlighted with spacing */
+    #modal_container Horizontal {
+        padding-bottom: 1;
+    }
+    #modal_container Input {
+        margin-right: 1;
+    }
+    #browse_file, #browse_folder {
+        background: $accent;
+        color: $text;
+        border: tall $primary;
+        min-width: 12;
+    }
+    #browse_file:hover, #browse_folder:hover {
+        background: $accent-darken-1;
+    }
     #downloads_toolbar {
         padding: 0 1;
     }
@@ -804,6 +842,7 @@ class TermoLoad(App):
             yield Button("Settings", id="btn_settings")
             yield Button("Logs", id="btn_logs")
             yield Button("Help", id="btn_help")
+            yield Button ("Minimize",id = "btn_minimize", variant="default")
 
         with Container(id="main"):
             with Vertical(id="settings_panel"):
@@ -812,20 +851,16 @@ class TermoLoad(App):
                 with Horizontal():
                     yield Input(id="settings_download_folder", placeholder="e.g., C:\\Users\\You\\Downloads")
                     yield Button("Browse", id="settings_browse", variant="default")
-                with Horizontal():
-                    yield Button("Save Settings", id="settings_save", variant="primary")
-                    yield Button("Cancel", id="settings_cancel", variant="default")
-
                 yield Label("Concurrent downloads:")
                 yield Input(id="settings_concurrent", placeholder="3")
                 yield Label("Max download speed (KB/s, 0 = unlimited):")
                 yield Input(id="settings_speed", placeholder="0")
 
-
-                yield Label("Shutdown PC when all downlaods complete ")
-                yield Input(id="settings_shutdown", placeholder="False")
-                yield Label("Allow real system shutdown (dangerous):")
-                yield Input(id="settings_allow_real_shutdown", placeholder="False")
+                yield Checkbox("Shutdown PC when all downloads complete (WARNING: Real shutdown!)", id="settings_shutdown")
+                
+                with Horizontal():
+                    yield Button("Cancel", id="settings_cancel", variant="default")
+                    yield Button("Save Settings", id="settings_save", variant="primary")
             yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
             with Horizontal(id="downloads_toolbar"):
                 yield Button("Pause Selected", id="btn_pause_sel")
@@ -841,6 +876,108 @@ class TermoLoad(App):
             yield Static("❓ Help/About here", id="help_panel")
 
         yield Footer()
+    
+    def _create_tray_icon_image(self):
+        width = 64
+        height = 64
+        image = Image.new("RGB", (width, height), color='#1e1e1e')
+        dc = ImageDraw.Draw(image)
+
+        dc.rectangle([20,15,44,25], fill="#00ff00")
+        dc.polygon([32,25],(20,35),(44,35), fill="#00ff00")
+        dc.rectangle([28,25,36,45], fill="#00ff00")
+        dc.rectangle([20,45,44,50], fill="#00ff00")
+
+        return image
+
+    def _setup_tray_icon(self):
+        if pystray is None:
+            logging.warning("[TermoLoad] pystray not installed, system tray icon disabled")
+            return
+        
+        try:
+            icon_image = self._create_tray_icon_image()
+            menu = pystray.Menu(
+                pystray.MenuItem("Show TermoLoad", self._restore_from_tray, default=True),
+                pystray.MenuItem("Active Downloads", lambda: self._show_active_count()),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Quit", self._quit_from_tray)
+            )
+            self.tray_icon = pystray.Icon(
+                "TermoLoad",
+                icon_image,
+                "TermoLoad",
+                menu)
+        except Exception:
+            logging.exception("[TermoLoad] Failed to create system tray icon")
+
+        def _show_active_count(self):
+            try:
+                active = [d for d in self.downloads if d.get("status") == "Downloading"]
+                completed = [d for d in self.downloads if d.get("status") == "Completed"]
+                
+                if self.tray_icon:
+                    self.tray_icon.notify(
+                        f"Active:{len(active)} | Completed:{len(completed)}",
+                        "TermoLoad Status"
+                    )
+            except Exception:
+                logging.exception("[TermoLoad] Failed to show active count")
+        
+        def minimize_to_tray(self):
+            if pystray is None:
+                logging.warning("[TermoLoad] pystray not installed, cannot minimize to tray")
+                return
+            try:
+                if not self.tray_icon:
+                    self._setup_tray_icon()
+                
+                if self.tray_icon and not self._minimized_to_tray:
+                    self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+                    self.tray_thread.start()
+                    self._minimized_to_tray = True
+                    logging.info("[TermoLoad] Minimized to system tray")
+                    self.exit()
+            except Exception:
+                logging.exception("[TermoLoad] Failed to minimize to tray")
+
+        def _restore_from_tray(self, icon=None, item=None):
+            try:
+                if self.tray_icon:
+                    self.tray_icon.stop()
+                    self.minimized_to_tray = False
+                logging.info("[TermoLoad] Restoring from tray")
+                new_app = TermoLoad()
+                new_app.run()
+            except Exception:
+                logging.exception("[TermoLoad] Failed to restore from tray")
+
+        def _quit_from_tray(self, icon=None, item=None):
+            try:
+                logging.info("[TermoLoad] Quitting from tray")
+                for task in self.download_tasks.values():
+                    if not task.done():
+                        task.cancel()
+                try:
+                    for d in self.downloads:
+                        if d.get("status") == "Downloading":
+                            d["status"] = "Paused"
+                    self.save_downloads_state(force=True)
+                except Exception:
+                    pass
+
+                if self.tray_icon:
+                    self.tray_icon.stop()
+
+                sys.exit(0)
+            except Exception:
+                logging.exception("[TermoLoad] Failed to quit from tray")
+        
+        def action_minimize_to_tray(self) -> None:
+            self.minimize_to_tray()
+
+
+                
 
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
@@ -954,9 +1091,7 @@ class TermoLoad(App):
             "download_folder": str(Path.cwd() / "downloads"),
             "concurrent": 3,
             "max_speed_kb": 0,
-            "shutdown_on_complete": False,
-            "allow_real_shutdown": False
-
+            "shutdown_on_complete": False
         }
         if settings_path.exists():
             try:
@@ -1008,14 +1143,8 @@ class TermoLoad(App):
         except Exception:
             pass
         try:
-            shutdown_input = self.query_one("#settings_shutdown", Input)
-            shutdown_input.value = str(self.settings.get("max_speed_kb", False))
-            shutdown_input.value = str(self.settings.get("shutdown_on_complete", False))
-        except Exception:
-            pass
-        try:
-            allow_input = self.query_one("#settings_allow_real_shutdown", Input)
-            allow_input.value = str(self.settings.get("allow_real_shutdown", False))
+            shutdown_checkbox = self.query_one("#settings_shutdown", Checkbox)
+            shutdown_checkbox.value = bool(self.settings.get("shutdown_on_complete", False))
         except Exception:
             pass
 
@@ -1176,6 +1305,9 @@ class TermoLoad(App):
         if event.button.id == "btn_add":
             self.push_screen(AddDownloadModal())
             return
+        if event.button.id == "btn_minimize":
+            self.minimize_to_tray()
+            return
         if event.button.id == "btn_pause_sel":
             self._pause_selected()
             return
@@ -1218,7 +1350,8 @@ class TermoLoad(App):
                 folder_input = self.query_one("#settings_download_folder", Input)
                 concurrent_input = self.query_one("#settings_concurrent", Input)
                 speed_input = self.query_one("#settings_speed", Input)
-                shutdown_input = self.query_one("#settings_shutdown", Input)
+                shutdown_checkbox = self.query_one("#settings_shutdown", Checkbox)
+                
                 self.settings["download_folder"] = folder_input.value.strip() or str(Path.cwd() / "downloads")
                 try:
                     self.settings["concurrent"] = int(concurrent_input.value.strip() or 3)
@@ -1228,17 +1361,8 @@ class TermoLoad(App):
                     self.settings["max_speed_kb"] = int(speed_input.value.strip() or 0)
                 except Exception:
                     self.settings["max_speed_kb"] = 0
-                try:
-                    sv = (shutdown_input.value or "").strip().lower()
-                    self.settings["shutdown_on_complete"] = sv in ("true", "1", "yes", "y")
-                except Exception:
-                    self.settings["shutdown_on_complete"] = False
-                try:
-                    allow_input = self.query_one("#settings_allow_real_shutdown", Input)
-                    av = (allow_input.value or "").strip().lower()
-                    self.settings["allow_real_shutdown"] = av in ("true", "1", "yes", "y")
-                except Exception:
-                    pass
+                
+                self.settings["shutdown_on_complete"] = shutdown_checkbox.value
                 self.save_settings()
 
             except Exception:
@@ -1250,9 +1374,8 @@ class TermoLoad(App):
             except Exception:
                 pass
 
-        # Only hide/show panels if this is a navigation button
         if event.button.id in ("btn_downloads", "btn_settings", "btn_logs", "btn_help"):
-            # First, hide ALL panels and widgets
+
             self.downloads_table.visible = False
             self.downloads_table.display = False
             self.downloads_toolbar.visible = False
@@ -1424,7 +1547,7 @@ class TermoLoad(App):
         lines.append("- Error: yt-dlp not installed  → pip install yt-dlp\n- Merge/Processing issues       → install ffmpeg and ensure it’s in PATH\n- Some sites need cookies/login → not yet supported via UI; future work")
         lines.append("")
         lines.append("Where to look\n--------------")
-        lines.append("- Logs tab shows the last 20 lines\n- Full log file: termoload.log in the app folder\n- Download state is saved per-user: ~/downloads_state.json")
+        lines.append(f"- Logs tab shows the last 20 lines\n- Full log file: {LOG_FILE_PATH}\n- Download state is saved per-user: ~/downloads_state.json")
         return "\n".join(lines)
 
     def _collect_current_errors(self) -> List[tuple]:
@@ -1874,17 +1997,13 @@ class TermoLoad(App):
 
             if all_completed:
                 logging.info("[TermoLoad] maybe_trigger_shutdown: All downloads completed, initiating shutdown")
-                allow_real = bool(self.settings.get("allow_real_shutdown", False))
                 try:
-                    if allow_real:
-                        if sys.platform.startswith("win"):
-                            cmd = ["shutdown", "/s", "/t", "0"]
-                        else:
-                            cmd = ["shutdown", "-h", "now"]
-                        subprocess.Popen(cmd, shell=False)
-                        logging.info(f"[TermoLoad] maybe_trigger_shutdown: Shutdown command executed: {' '.join(cmd)}")
+                    if sys.platform.startswith("win"):
+                        cmd = ["shutdown", "/s", "/t", "0"]
                     else:
-                        logging.info("[TermoLoad] DEBUG: Shut down (simulated)")
+                        cmd = ["shutdown", "-h", "now"]
+                    subprocess.Popen(cmd, shell=False)
+                    logging.info(f"[TermoLoad] maybe_trigger_shutdown: Shutdown command executed: {' '.join(cmd)}")
                 except Exception:
                     logging.exception("[TermoLoad] maybe_trigger_shutdown: Failed to execute shutdown command")
                 self._shutdown_triggered = True

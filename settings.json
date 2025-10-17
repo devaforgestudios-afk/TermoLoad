@@ -3,5 +3,5 @@
   "concurrent": 3,
   "max_speed_kb": 0,
   "shutdown_on_complete": true,
-  "allow_real_shutdown": false
+  "allow_real_shutdown": true
 }
