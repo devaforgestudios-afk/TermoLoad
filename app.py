@@ -991,9 +991,6 @@ class TermoLoad(App):
                     logging.warning(f"[TermoLoad] Failed to show console window: {e}")
             
             logging.info("[TermoLoad] Restoring from tray")
-            
-            # Restart the app in the same process using os.execv
-            # This replaces the current process with a new instance
             python = sys.executable
             os.execv(python, [python] + sys.argv)
             
@@ -1224,10 +1221,39 @@ class TermoLoad(App):
                     filled = int(round(prog * bar_w))
                     bar = f"[{('#'*filled).ljust(bar_w, '-')}]"
                     bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
+
+                    eta_str = d.get("eta", "--")
+                    status = d.get("status", "Queued")
+
+                    if status == "Downloading" and eta_str and eta_str != '--':
+                        pass
+                    elif status == "Completed":
+                        eta_str = "Done"
+                    elif status == "Paused":
+                        eta_str = "--"
+                    elif status == "Queued":
+                        eta_str = "Waiting"
+                    elif status.startswith("Error"):
+                        eta_str = "--"
+
+                    try:
+                        eta_secs = 0
+                        parts = eta_str.split()
+                        for part in parts:
+                            if part.endswith('h'):
+                                eta_secs += int(part[:-1]) * 3600
+                            elif part.endswith('m'):
+                                eta_secs += int(part[:-1]) * 60
+                            elif part.endswith('s'):
+                                eta_secs += int(part[:-1])
+                        if eta_secs <= 5:
+                            status = "Finishing"
+                    except Exception:
+                        pass
                     self.downloads_table.update_cell(row_key, 3, f"{bar} {pct}{bytes_txt}")
                     self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
-                    self.downloads_table.update_cell(row_key, 5, d.get('status', 'Queued'))
-                    self.downloads_table.update_cell(row_key, 6, d.get('eta', '--'))
+                    self.downloads_table.update_cell(row_key, 5, status)
+                    self.downloads_table.update_cell(row_key, 6, eta_str)
                 except Exception:
                     rebuild_needed = True
                     break
@@ -1262,14 +1288,27 @@ class TermoLoad(App):
                             filled = int(round(prog * bar_w))
                             bar = f"[{('#'*filled).ljust(bar_w, '-')}]"
                             bytes_txt = f" ({_fmt_bytes(dl)}/{_fmt_bytes(total)})" if total > 0 else ""
+                            
+                            eta_str = d.get('eta', '--')
+                            status = d.get('status', 'Queued')
+                            
+                            if status == "Completed":
+                                eta_str = "Done"
+                            elif status == "Paused":
+                                eta_str = "--"
+                            elif status == "Queued":
+                                eta_str = "Waiting"
+                            elif status.startswith("Error"):
+                                eta_str = "--"
+                            
                             rk = self.downloads_table.add_row(
                                 str(d.get("id")),
                                 d.get("type", ""),
                                 d.get("name", ""),
                                 f"{bar} {pct}{bytes_txt}",
                                 d.get('speed', '0 B/s'),
-                                d.get('status', 'Queued'),
-                                d.get('eta', '--')
+                                status,
+                                eta_str
                             )
                             d['row_key'] = rk
                         except Exception:
