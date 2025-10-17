@@ -604,6 +604,8 @@ class AddDownloadModal(ModalScreen[dict]):
             yield Static("Add New Download",id="modal_title")
             yield Label("Enter URL or Torrent File Path:")
             yield Input(id="download_input", placeholder="Enter URL or path...")
+            with Horizontal():
+                yield Button("Browse File", id="browse_file", variant="default")
             yield Label("Save to folder:")
             yield Input(
                 id="save_path",
@@ -638,6 +640,21 @@ class AddDownloadModal(ModalScreen[dict]):
                 self.dismiss(None)
         elif event.button.id == "cancel_add":
             self.dismiss(None)
+
+        elif event.button.id == "browse_file":
+            try:
+                root = tk.Tk()
+                root.withdraw()
+                file_path = tkinter.filedialog.askopenfilename(
+                    title= "Select Torrent File",
+                    filetypes=[("Torrent Files", "*.torrent"), ("All Files", "*.*")]
+                )
+                if file_path:
+                    url_widget = self.query_one("#download_input", Input)
+                    url_widget.value = file_path
+                root.destroy()
+            except Exception:
+                pass
         
         elif event.button.id == "browse_folder":
             try:
@@ -685,7 +702,7 @@ class PathSelectModel(ModalScreen[str]):
                 root.destroy()
             except:
                 pass
-class DownloadManager(App):
+class TermoLoad(App):
     BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download")]
 
     CSS = """
@@ -1683,16 +1700,30 @@ class DownloadManager(App):
                 custom_path = result["path"]
                 logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
                 new_id = len(self.downloads) + 1
-                d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
-                try:
-                    if d_type == "URL" and RealDownloader.is_video_url(url):
-                        d_type = "Video"
-                except Exception:
-                    pass
-                if url.startswith(("http://", "https://")):
-                    name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
+                is_torrent =(
+                    url.startwith("magnet:") or
+                    url.endswith(".torrent") or
+                    (os.path.isfile(url) and url.lower().endswith(".torrent"))
+                )
+                if is_torrent:
+                    d_type = "Torrent"
+                    if os.path.isfile(url):
+                        name = os.path.basename(url)
+                    else:
+                        name = f"torrent_{new_id}"
                 else:
-                    name = url.split("/")[-1] or f"download_{new_id}"
+                    d_type = "URL"
+                    try:
+                        if RealDownloader.is_video_url(url):
+                            d_type = "Video"
+                    except Exception:
+                        pass
+
+                    if url.startswith(("http://", "https://")):
+                        name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
+                    else:
+                        name = url.split("/")[-1] or f"download_{new_id}"
+
                 new_entry = {
                     "id": new_id,
                     "type": d_type,
@@ -1701,7 +1732,7 @@ class DownloadManager(App):
                     "path": custom_path,
                     "progress": 0.0,
                     "speed": "0 B/s",
-                    "status": "Queued",
+                    "status": "Queued" if d_type != "Torrent" else "Pending",
                     "eta": "--"
                 }
                 logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
@@ -1724,7 +1755,7 @@ class DownloadManager(App):
                             new_entry["name"],
                             "0.00%",
                             "0 B/s",
-                            "Queued",
+                            new_entry["status"],
                             "--"
                         )
                     except Exception:
@@ -1759,7 +1790,13 @@ class DownloadManager(App):
                     self.help_panel.display = False
                 except Exception:
                     pass
-                if d_type == "URL":
+                if d_type == "Torrent":
+                    logging.info(f"[TermoLoad] Queuing torrent download {url}")
+                    for d in self.downloads:
+                        if d.get("id") == new_id:
+                            d["status"] = "Pending"
+                            break
+                elif d_type == "URL":
                     logging.info(f"[TermoLoad] Queuing download {new_id} -> {url} -> {custom_path}")
                     try:
                         task = asyncio.create_task(
@@ -1772,20 +1809,17 @@ class DownloadManager(App):
                 elif d_type == "Video":
                     logging.info(f"[TermoLoad] Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
                     try:
-                        try:
-                            for item in self.downloads:
+                        for item in self.downloads:
                                 if item.get("id") == new_id:
                                     item["name"] = item.get("name") or "(resolving title...)"
                                     break
-                        except Exception:
-                            pass
                         task = asyncio.create_task(
                             self.downloader.download_with_ytdlp(url, new_id, custom_path, None)
                         )
                         self.download_tasks[new_id] = task
                         logging.info(f"[TermoLoad] Created asyncio task for yt-dlp download {new_id}")
                     except Exception as ex:
-                        logging.exception(f"[TermoLoad] Failed to create yt-dlp task: {ex}")
+                            logging.exception(f"[TermoLoad] Failed to create yt-dlp task: {ex}")
 
     
     def scroll_downloads_to_top(self) -> None:
@@ -1869,12 +1903,25 @@ class DownloadManager(App):
             custom_path = result.get('path')
 
             new_id = len(self.downloads) + 1
-            d_type = "Torrent" if (url.endswith(".torrent") or url.startswith("magnet:")) else "URL"
+            is_torrent =(
+                url.startswith("magnet:") or
+                url.endswith(".torrent") or
+                (os.path.isfile(url) and url.lower().endswith(".torrent"))
+                    )
+            if is_torrent:
+                d_type = "Torrent"
+                if os.path.isfile(url):
+                    name = os.path.basename(url)
+                else:
+                    name = f"torrent_{new_id}"
+            else:
+                d_type = "URL"
             try:
-                if d_type == "URL" and RealDownloader.is_video_url(url):
+                if RealDownloader.is_video_url(url):
                     d_type = "Video"
             except Exception:
                 pass
+
             if url.startswith(("http://", "https://")):
                 name = os.path.basename(urlparse(url).path) or f"download_{new_id}"
             else:
@@ -1888,7 +1935,7 @@ class DownloadManager(App):
                 "path": custom_path,
                 "progress": 0.0,
                 "speed": "0 B/s",
-                "status": "Queued",
+                "status": "Queued" if d_type != "Torrent" else "Pending",
                 "eta": "--"
             }
 
@@ -1900,7 +1947,7 @@ class DownloadManager(App):
                     new_entry["name"],
                     "0.00%",
                     "0 B/s",
-                    "Queued",
+                    new_entry["status"],
                     "--"
                 )
                 new_entry["row_key"] = row_key
@@ -1917,7 +1964,6 @@ class DownloadManager(App):
                 self.scroll_downloads_to_top()
             except Exception:
                 pass
-            # Show Downloads tab
             try:
                 self.downloads_table.visible = True
                 self.downloads_table.display = True
@@ -1935,8 +1981,13 @@ class DownloadManager(App):
                 self.help_panel.display = False
             except Exception:
                 pass
-
-            if d_type == "URL":
+            if d_type == "Torrent":
+                logging.info(f"[TermoLoad] Torrent detected: {url}")
+                for d in self.downloads:
+                    if d.get("id") == new_id:
+                        d["status"] = "Pending"
+                        break
+            elif d_type == "URL":
                 logging.info(f"[TermoLoad] process_modal_result: Queuing download {new_id} -> {url} -> {custom_path}")
                 try:
                     task = asyncio.create_task(
@@ -1946,16 +1997,14 @@ class DownloadManager(App):
                     logging.info(f"[TermoLoad] process_modal_result: Created asyncio task for download {new_id}")
                 except Exception as ex:
                     logging.exception(f"[TermoLoad] process_modal_result: Failed to create task: {ex}")
+            
             elif d_type == "Video":
                 logging.info(f"[TermoLoad] process_modal_result: Queuing yt-dlp download {new_id} -> {url} -> {custom_path}")
                 try:
-                    try:
-                        for item in self.downloads:
-                            if item.get("id") == new_id:
+                    for item in self.downloads:
+                        if item.get("id") == new_id:
                                 item["name"] = item.get("name") or "(resolving title...)"
                                 break
-                    except Exception:
-                        pass
                     task = asyncio.create_task(
                         self.downloader.download_with_ytdlp(url, new_id, custom_path, None)
                     )
@@ -2088,5 +2137,5 @@ class DownloadManager(App):
 
         
 if __name__ == "__main__":
-    app = DownloadManager()
+    app = TermoLoad()
     app.run()
