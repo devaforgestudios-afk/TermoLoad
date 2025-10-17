@@ -19,6 +19,7 @@ import pystray
 import sys
 import subprocess
 import logging
+import ctypes
 from collections import deque
 from typing import Optional, Dict, Any, List
 try:
@@ -55,11 +56,6 @@ logging.getLogger().addHandler(buffer_handler)
 class RealDownloader:
     def __init__(self,app_instance):
         super().__init__()
-        self.downloader = RealDownloader(self)
-        self.download_tasks = {}
-        self.tray_icon = None
-        self.tray_thread = None
-        self.minimized_to_tray = False
         self.app = app_instance
         self.session = None
 
@@ -832,6 +828,9 @@ class TermoLoad(App):
         super().__init__()
         self.downloader = RealDownloader(self)
         self.download_tasks={}
+        self.tray_icon = None
+        self.tray_thread = None
+        self._minimized_to_tray = False
     
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True) 
@@ -880,11 +879,13 @@ class TermoLoad(App):
     def _create_tray_icon_image(self):
         width = 64
         height = 64
-        image = Image.new("RGB", (width, height), color='#1e1e1e')
+        # Use RGBA with transparent background for better tray icon appearance
+        image = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
         dc = ImageDraw.Draw(image)
 
+        # Draw download icon in green
         dc.rectangle([20,15,44,25], fill="#00ff00")
-        dc.polygon([32,25],(20,35),(44,35), fill="#00ff00")
+        dc.polygon([(32,25),(20,35),(44,35)], fill="#00ff00")
         dc.rectangle([28,25,36,45], fill="#00ff00")
         dc.rectangle([20,45,44,50], fill="#00ff00")
 
@@ -911,71 +912,117 @@ class TermoLoad(App):
         except Exception:
             logging.exception("[TermoLoad] Failed to create system tray icon")
 
-        def _show_active_count(self):
-            try:
-                active = [d for d in self.downloads if d.get("status") == "Downloading"]
-                completed = [d for d in self.downloads if d.get("status") == "Completed"]
+    def _show_active_count(self):
+        try:
+            active = [d for d in self.downloads if d.get("status") == "Downloading"]
+            completed = [d for d in self.downloads if d.get("status") == "Completed"]
+            
+            if self.tray_icon:
+                self.tray_icon.notify(
+                    f"Active:{len(active)} | Completed:{len(completed)}",
+                    "TermoLoad Status"
+                )
+        except Exception:
+            logging.exception("[TermoLoad] Failed to show active count")
+    
+    def minimize_to_tray(self):
+        if pystray is None:
+            logging.warning("[TermoLoad] pystray not installed, cannot minimize to tray")
+            return
+        try:
+            if not self.tray_icon:
+                self._setup_tray_icon()
+            
+            if self.tray_icon and not self._minimized_to_tray:
+                # Non-daemon thread so it keeps running after self.exit()
+                self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=False)
+                self.tray_thread.start()
+                self._minimized_to_tray = True
+                logging.info("[TermoLoad] Minimized to system tray")
                 
-                if self.tray_icon:
-                    self.tray_icon.notify(
-                        f"Active:{len(active)} | Completed:{len(completed)}",
-                        "TermoLoad Status"
-                    )
-            except Exception:
-                logging.exception("[TermoLoad] Failed to show active count")
-        
-        def minimize_to_tray(self):
-            if pystray is None:
-                logging.warning("[TermoLoad] pystray not installed, cannot minimize to tray")
-                return
-            try:
-                if not self.tray_icon:
-                    self._setup_tray_icon()
+                # Hide the console window from taskbar on Windows
+                if sys.platform == 'win32':
+                    try:
+                        # Get console window handle
+                        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                        if hwnd:
+                            # Hide from taskbar by removing WS_EX_APPWINDOW and adding WS_EX_TOOLWINDOW
+                            GWL_EXSTYLE = -20
+                            WS_EX_APPWINDOW = 0x00040000
+                            WS_EX_TOOLWINDOW = 0x00000080
+                            
+                            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                            style = (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+                            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+                            
+                            # Hide the window
+                            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE = 0
+                    except Exception as e:
+                        logging.warning(f"[TermoLoad] Failed to hide console window: {e}")
                 
-                if self.tray_icon and not self._minimized_to_tray:
-                    self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
-                    self.tray_thread.start()
-                    self._minimized_to_tray = True
-                    logging.info("[TermoLoad] Minimized to system tray")
-                    self.exit()
-            except Exception:
-                logging.exception("[TermoLoad] Failed to minimize to tray")
+                self.exit()
+        except Exception:
+            logging.exception("[TermoLoad] Failed to minimize to tray")
 
-        def _restore_from_tray(self, icon=None, item=None):
-            try:
-                if self.tray_icon:
-                    self.tray_icon.stop()
-                    self.minimized_to_tray = False
-                logging.info("[TermoLoad] Restoring from tray")
-                new_app = TermoLoad()
-                new_app.run()
-            except Exception:
-                logging.exception("[TermoLoad] Failed to restore from tray")
-
-        def _quit_from_tray(self, icon=None, item=None):
-            try:
-                logging.info("[TermoLoad] Quitting from tray")
-                for task in self.download_tasks.values():
-                    if not task.done():
-                        task.cancel()
+    def _restore_from_tray(self, icon=None, item=None):
+        try:
+            if self.tray_icon:
+                self.tray_icon.stop()
+                self._minimized_to_tray = False
+            
+            # Show the console window on Windows before restoring
+            if sys.platform == 'win32':
                 try:
-                    for d in self.downloads:
-                        if d.get("status") == "Downloading":
-                            d["status"] = "Paused"
-                    self.save_downloads_state(force=True)
-                except Exception:
-                    pass
+                    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                    if hwnd:
+                        # Restore taskbar visibility by adding WS_EX_APPWINDOW
+                        GWL_EXSTYLE = -20
+                        WS_EX_APPWINDOW = 0x00040000
+                        WS_EX_TOOLWINDOW = 0x00000080
+                        
+                        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                        style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
+                        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+                        
+                        # Show and activate the window
+                        ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE = 9
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception as e:
+                    logging.warning(f"[TermoLoad] Failed to show console window: {e}")
+            
+            logging.info("[TermoLoad] Restoring from tray")
+            
+            # Restart the app in the same process using os.execv
+            # This replaces the current process with a new instance
+            python = sys.executable
+            os.execv(python, [python] + sys.argv)
+            
+        except Exception:
+            logging.exception("[TermoLoad] Failed to restore from tray")
 
-                if self.tray_icon:
-                    self.tray_icon.stop()
-
-                sys.exit(0)
+    def _quit_from_tray(self, icon=None, item=None):
+        try:
+            logging.info("[TermoLoad] Quitting from tray")
+            for task in self.download_tasks.values():
+                if not task.done():
+                    task.cancel()
+            try:
+                for d in self.downloads:
+                    if d.get("status") == "Downloading":
+                        d["status"] = "Paused"
+                self.save_downloads_state(force=True)
             except Exception:
-                logging.exception("[TermoLoad] Failed to quit from tray")
-        
-        def action_minimize_to_tray(self) -> None:
-            self.minimize_to_tray()
+                pass
 
+            if self.tray_icon:
+                self.tray_icon.stop()
+
+            sys.exit(0)
+        except Exception:
+            logging.exception("[TermoLoad] Failed to quit from tray")
+    
+    def action_minimize_to_tray(self) -> None:
+        self.minimize_to_tray()
 
                 
 
@@ -1301,7 +1348,6 @@ class TermoLoad(App):
 
     def on_button_pressed(self, event) -> None:
         
-        # Handle action buttons (non-navigation) - these don't change views
         if event.button.id == "btn_add":
             self.push_screen(AddDownloadModal())
             return
