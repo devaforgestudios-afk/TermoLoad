@@ -20,6 +20,8 @@ import sys
 import subprocess
 import logging
 import ctypes
+import winsound
+import libtorrent
 from collections import deque
 from typing import Optional, Dict, Any, List
 try:
@@ -58,6 +60,219 @@ class RealDownloader:
         super().__init__()
         self.app = app_instance
         self.session = None
+        self.torrent_session: None
+        self.torrent_handles = {}
+
+    def start_torrent_session(self):
+        if self.torrent_session is None:
+            try:
+                settings={
+                    'user_agen': 'TermoLoad/1.0 libtorrent/'+libtorrent.version,
+                    'listen_interfaces': '0.0.0.0:6881',
+                    'enable_dht': True,
+                    'enable_lsd': True,
+                    'enable_upnp': True,
+                    'enable_natpmp': True,
+                }
+                self.torrent_session.apply_settings(settings)
+                self.torrent_session.add_dht_router("router.bittorrent.com", 6881)
+                self.torrent_session.add_dht_router("router.utorrent.com", 6881)
+                self.torrent_session.add_dht_router("dht.transmissionbt.com", 6881)
+                logging.info("[TermoLoad] Torrent session started")
+            except Exception as e:
+                logging.exception(f"[TermoLoad] Failed to start session: {e}")
+                self.torrent_session = None
+    
+    async def download_torrent(self, url:str,download_id:int, custom_path:str) -> bool:
+        try:
+            if self.torrent_session is None:
+                self.start_torrent_session()
+            
+            if self.torrent_session is None:
+                self.update_download_progress(
+                    download_id, 0.0, 0, 0, "Error: Torrent session not available"
+                    )
+                return False
+            
+            save_path= Path(custom_path or "downloads")
+            save_path.mkdir(parents=True, exist_ok=True)
+
+            params={
+                'save_path': str(save_path),
+                'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
+            }
+            if url.startswith("magnet:"):
+                logging.info(f"[TermoLoad] Adding magnet link: {url[:50]}")
+                params['url'] = url
+                handle = self.torrent_session.add_torrent(params)
+            elif os.path.isfile(url):
+                logging.info(f"[TermoLoad] Adding torrent file: {url}")
+                info = libtorrent.torrent_info(url)
+                params['ti'] = info
+                handle = self.torrent_session.add_torrent(params)
+            elif url.startswith("http://","https://") and url.endswith(".torrent"):
+                logging.info(f"[TermoLoad] Downloading torrent from: {url}")
+                await self.start_session()
+                async with self.session.get(url) as response:
+                    if response.status == 200:
+                        torrent_data = await response.read()
+                        temp_torrent = save_path / f"temp_{download_id}.torrent"
+                        async with aiofiles.open(temp_torrent, "wb") as f:
+                            await f.write(torrent_data)
+                        info = libtorrent.torrent_info(str(temp_torrent))
+                        params['ti'] = info
+                        handle = self.torrent_session.add_torrent(params)
+                        try:
+                            temp_torrent.unlink()
+                        except:
+                            pass
+                    else:
+                        self.update_download_progress(
+                            download_id, 0.0, 0, 0,
+                            f"Error: Failed to download torrent file (HTTP {response.status})"
+                            )
+                        return False
+            else:
+                self.update_download_progress(
+                    download_id, 0.0, 0, 0,
+                    "Error: Invalid torrent source"
+                )
+                return
+            self.torrent_handles[download_id] = handle
+
+            try:
+                torrent_name = handle.status().name
+                for d in self.app.downloads:
+                    if d.get("id") == download_id:
+                        d["name"] = torrent_name
+                        break
+            except Exception:
+                pass
+
+            logging.info(f"[TermoLoad] Torrent added, starting download: {download_id}")
+            while True:
+                if download_id not in self.torrent_handles:
+                    logging.info(f"[TermoLoad] Torrent download cancelled: {download_id}")
+                    return False
+                try:
+                    status = handle.status()
+                except Exception:
+                    break
+                
+                state = status.state
+                progress = status.progress
+                download_rate = status.download_rate
+                total_size = status.total_wanted
+                downloaded = status.total_wanted_done
+                num_peers = status.num_peers
+                num_seeds = status.num_seeds
+
+                if download_rate > 0:
+                    remaining = total_size - downloaded
+                    eta_seconds = remaining / download_rate
+                else:
+                    eta_seconds = 0
+                
+                self.update_torrent_peers(download_id, num_peers, num_seeds)
+
+                try:
+                    for d in self.app.downloads:
+                        if d.get("id") == download_id:
+                            d["total_size"] = total_size
+                            d["downloaded_bytes"] = downloaded
+                            break
+                except Exception:
+                    pass
+                
+                if state == libtorrent.torrent_status.seeding:
+                    status_text = "Checking Files"
+                elif state == libtorrent.torrent_status.downloading_metadata:
+                    status_text = "Downloading Metadata"
+                elif state == libtorrent.torrent_status.downloading:
+                    status_text = "Downloading"
+                elif state == libtorrent.torrent_status.finished:
+                    status_text = "Completed"
+                elif state == libtorrent.torrent_status.seeding:
+                    status_text = "Seeding"
+                elif state == libtorrent.torrent_status.allocating:
+                    status_text = "Allocating"
+                else:
+                    status_text=f"State {state}"
+
+                self.update_download_progress(
+                    download_id,
+                    progress,
+                    download_rate,
+                    eta_seconds,
+                    status_text
+                )
+
+                if status_text in ("Completed","Seeding"):
+                    logging.info(f"[TermoLoad] Torrent {download_id}completed !")
+                    try:
+                        for d in self.app.downloads:
+                            if d.get("id") == download_id:
+                                torrent_info = handle.torrent_file()
+                                if torrent_info:
+                                    d["filepath"] = str(save_path / torrent_info.name())
+                    except Exception:
+                        pass
+                    self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                    
+                    try:
+                        self.app.save_downloads_state(force=True)
+                    except Exception:
+                        pass
+
+                    self.torrent_handles.pop(download_id, None)
+                    return True
+                
+                await asyncio.sleep(1.0)
+            return False
+        except asyncio.CancelledError:
+            logging.info(f"[TermoLoad] Torrent {download_id} paused")
+            try:
+                handle = self.torrent_handles.get(download_id)
+                if handle:
+                    handle.pause()
+                for d in self.app.downloads:
+                    if d.get("id") == download_id:
+                        d["status"] = "Paused"
+                        break
+                self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return False
+        except Exception as e:
+            logging.exception(f"[TermoLoad] download_torrent exception id={download_id}: {e}")
+            self.update_download_progress(
+                download_id,0,0,0,
+                f"Error:{str(e)[:50]}"
+            )
+            try:
+                self.app.save_downloads_state(force=True)
+            except Exception:
+                pass
+            return False
+    
+    def stop_torrent(self,download_id:int):
+        try:
+            handle = self.torrent_handles.get(download_id)
+            if handle:
+                handle.pause()
+                logging.info(f"[TermoLoad] Torrent paused: {download_id}")
+        except Exception:
+            logging.exception(f"[TermoLoad] Failed to pause torrent {download_id}")
+
+    def remove_torrent(self,download_id:int):
+        try:
+            handle = self.torrent_handles.pop(download_id, None)
+            if handle and self.torrent_session:
+                self.torrent_session.remove_torrent(handle)
+                logging.info(f"[TermoLoad] Torrent removed: {download_id}")
+        except Exception:
+            logging.exception(f"[TermoLoad] Failed to remove torrent {download_id}")
+
 
     async def start_session(self):
         if not self.session:
@@ -570,6 +785,16 @@ class RealDownloader:
                 download["eta"] = self.format_time(eta)
                 prev_status = download.get("status")
                 download["status"] = status
+                
+                # Play notification sounds on status change
+                try:
+                    if status == "Completed" and prev_status != "Completed":
+                        self.app._play_completion_sound()
+                    elif status.startswith("Error") and not prev_status.startswith("Error"):
+                        self.app._play_error_sound()
+                except Exception:
+                    pass
+                
                 try:
                     if status == "Downloading":
                         self.app._previous_had_active = True
@@ -606,6 +831,58 @@ class RealDownloader:
             return any(h in host for h in ("youtube.com", "youtu.be", "m.youtube.com", "youtube-nocookie.com"))
         except Exception:
             return False
+    
+    @staticmethod
+    def extract_magnet_name(magnet_url: str) -> Optional[str]:
+        """Extract display name from magnet link.
+        Parses the dn (display name) parameter from magnet URI.
+        Returns None if not found or not a magnet link.
+        """
+        try:
+            if not magnet_url.startswith("magnet:"):
+                return None
+            
+            # Parse the magnet URL to extract the dn parameter
+            from urllib.parse import parse_qs, unquote
+            
+            # Split on ? to get the query part
+            if "?" not in magnet_url:
+                return None
+            
+            query_part = magnet_url.split("?", 1)[1]
+            params = parse_qs(query_part)
+            
+            # Get the dn (display name) parameter
+            if "dn" in params and params["dn"]:
+                display_name = unquote(params["dn"][0])
+                # Clean up the name - replace + with spaces and decode
+                display_name = display_name.replace("+", " ")
+                return display_name.strip()
+            
+            # If no dn parameter, try to extract hash as fallback
+            if "xt" in params and params["xt"]:
+                xt = params["xt"][0]
+                if ":" in xt:
+                    hash_value = xt.split(":")[-1]
+                    return f"torrent_{hash_value[:8]}"
+            
+            return None
+        except Exception:
+            return None
+    
+    def update_torrent_peers(self, download_id: int, peers: int, seeds: int) -> None:
+        """Update peer and seed count for a torrent download.
+        This will be called by the torrent engine once implemented.
+        """
+        try:
+            for d in self.app.downloads:
+                if d.get("id") == download_id and d.get("type") == "Torrent":
+                    d["peers"] = peers
+                    d["seeds"] = seeds
+                    logging.debug(f"[TermoLoad] Updated torrent {download_id}: {peers} peers, {seeds} seeds")
+                    break
+        except Exception:
+            logging.exception(f"[TermoLoad] Failed to update peer/seed count for torrent {download_id}")
     
 class AddDownloadModal(ModalScreen[dict]):
     def compose(self) -> ComposeResult:
@@ -856,6 +1133,8 @@ class TermoLoad(App):
                 yield Input(id="settings_speed", placeholder="0")
 
                 yield Checkbox("Shutdown PC when all downloads complete (WARNING: Real shutdown!)", id="settings_shutdown")
+                yield Checkbox("Play sound on download completion", id="settings_sound_complete")
+                yield Checkbox("Play sound on download error", id="settings_sound_error")
                 
                 with Horizontal():
                     yield Button("Cancel", id="settings_cancel", variant="default")
@@ -890,6 +1169,38 @@ class TermoLoad(App):
         dc.rectangle([20,45,44,50], fill="#00ff00")
 
         return image
+
+    def _play_completion_sound(self):
+        """Play a sound when a download completes successfully."""
+        if not self.settings.get("sound_on_complete", True):
+            return
+        
+        def _play():
+            try:
+                # Try to play a pleasant completion sound (ascending beep)
+                winsound.Beep(800, 150)  # Higher pitch, short
+                time.sleep(0.05)
+                winsound.Beep(1000, 200)  # Even higher, medium
+            except Exception:
+                logging.debug("[TermoLoad] Failed to play completion sound")
+        
+        threading.Thread(target=_play, daemon=True).start()
+    
+    def _play_error_sound(self):
+        """Play a sound when a download encounters an error."""
+        if not self.settings.get("sound_on_error", True):
+            return
+        
+        def _play():
+            try:
+                # Play an error sound (lower descending beeps)
+                winsound.Beep(500, 200)  # Low pitch, short
+                time.sleep(0.05)
+                winsound.Beep(300, 250)  # Lower pitch, medium
+            except Exception:
+                logging.debug("[TermoLoad] Failed to play error sound")
+        
+        threading.Thread(target=_play, daemon=True).start()
 
     def _setup_tray_icon(self):
         if pystray is None:
@@ -1047,7 +1358,7 @@ class TermoLoad(App):
         self.status_info.visible = False
         self.status_info.display = False
 
-        self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed", "Status", "ETA")
+        self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed","Peers/Seeds", "Status", "ETA")
         # Make row selection explicit and visible
         try:
             self.downloads_table.cursor_type = "row"
@@ -1085,11 +1396,26 @@ class TermoLoad(App):
                     "eta": entry.get("eta", "--"),
                     "downloaded_bytes": int(entry.get("downloaded_bytes", 0) or 0),
                     "total_size": int(entry.get("total_size", 0) or 0),
-                    "filepath": entry.get("filepath", "")
+                    "filepath": entry.get("filepath", ""),
+                    "peers": entry.get("peers", 0),
+                    "seeds": entry.get("seeds", 0)
                 }
+                
+                # Format peer/seed display for table
+                peers_seeds = "--"
+                if d.get("type") == "Torrent":
+                    peers = d.get("peers", 0)
+                    seeds = d.get("seeds", 0)
+                    if peers > 0 or seeds > 0:
+                        peers_seeds = f"{peers}↓/{seeds}↑"
+                    elif d.get("status") == "Pending":
+                        peers_seeds = "Waiting..."
+                    elif d.get("status") == "Downloading":
+                        peers_seeds = "Connecting..."
+                
                 try:
                     rk = self.downloads_table.add_row(
-                        str(d["id"]), d["type"], d["name"], f"{int(d['progress']*100)}%", d["speed"], d["status"], d["eta"]
+                        str(d["id"]), d["type"], d["name"], f"{int(d['progress']*100)}%", d["speed"], peers_seeds, d["status"], d["eta"]
                     )
                 except Exception:
                     rk = len(self.downloads)
@@ -1135,7 +1461,9 @@ class TermoLoad(App):
             "download_folder": str(Path.cwd() / "downloads"),
             "concurrent": 3,
             "max_speed_kb": 0,
-            "shutdown_on_complete": False
+            "shutdown_on_complete": False,
+            "sound_on_complete": True,
+            "sound_on_error": True
         }
         if settings_path.exists():
             try:
@@ -1191,6 +1519,16 @@ class TermoLoad(App):
             shutdown_checkbox.value = bool(self.settings.get("shutdown_on_complete", False))
         except Exception:
             pass
+        try:
+            sound_complete_checkbox = self.query_one("#settings_sound_complete", Checkbox)
+            sound_complete_checkbox.value = bool(self.settings.get("sound_on_complete", True))
+        except Exception:
+            pass
+        try:
+            sound_error_checkbox = self.query_one("#settings_sound_error", Checkbox)
+            sound_error_checkbox.value = bool(self.settings.get("sound_on_error", True))
+        except Exception:
+            pass
 
     async def sync_table_from_downloads(self):
         try:
@@ -1224,6 +1562,16 @@ class TermoLoad(App):
 
                     eta_str = d.get("eta", "--")
                     status = d.get("status", "Queued")
+                    peers = "--"
+                    if d.get("type") == "Torrent":
+                        peers = d.get("peers",0)
+                        seeds = d.get("seeds",0)
+                        if peers > 0 or seeds > 0:
+                            peers_seeds = f"{peers}↓/{seeds}↑"
+                        elif status == "Downloading":
+                            peers_seeds = "Connecting..."
+                        
+
 
                     if status == "Downloading" and eta_str and eta_str != '--':
                         pass
@@ -1254,6 +1602,9 @@ class TermoLoad(App):
                     self.downloads_table.update_cell(row_key, 4, d.get('speed', '0 B/s'))
                     self.downloads_table.update_cell(row_key, 5, status)
                     self.downloads_table.update_cell(row_key, 6, eta_str)
+                    self.downloads_table.update_cell(row_key, 5, peers_seeds)
+                    self.downloads_table.update_cell(row_key, 6, status)
+                    self.downloads_table.update_cell(row_key, 7, eta_str)
                 except Exception:
                     rebuild_needed = True
                     break
@@ -1291,6 +1642,17 @@ class TermoLoad(App):
                             
                             eta_str = d.get('eta', '--')
                             status = d.get('status', 'Queued')
+                            peers_seeds = "--"
+
+                            if d.get("type") == "Torrent":
+                                peers = d.get("peers",0)
+                                seeds = d.get("seeds",0)
+                                if peers > 0 or seeds > 0:
+                                    peers_seeds = f"{peers}↓/{seeds}↑"
+                                elif status == "Downloading":
+                                    peers_seeds = "Connecting..."
+                                elif status == "Pending":
+                                    peers_seeds = "Waiting..."
                             
                             if status == "Completed":
                                 eta_str = "Done"
@@ -1307,6 +1669,7 @@ class TermoLoad(App):
                                 d.get("name", ""),
                                 f"{bar} {pct}{bytes_txt}",
                                 d.get('speed', '0 B/s'),
+                                peers_seeds,
                                 status,
                                 eta_str
                             )
@@ -1366,7 +1729,6 @@ class TermoLoad(App):
                 self._throttled_save_state()
             except Exception:
                 pass
-            # Update inline status explanation for the selected row
             try:
                 sel = self._get_selected_download()
                 if sel is not None:
@@ -1436,6 +1798,8 @@ class TermoLoad(App):
                 concurrent_input = self.query_one("#settings_concurrent", Input)
                 speed_input = self.query_one("#settings_speed", Input)
                 shutdown_checkbox = self.query_one("#settings_shutdown", Checkbox)
+                sound_complete_checkbox = self.query_one("#settings_sound_complete", Checkbox)
+                sound_error_checkbox = self.query_one("#settings_sound_error", Checkbox)
                 
                 self.settings["download_folder"] = folder_input.value.strip() or str(Path.cwd() / "downloads")
                 try:
@@ -1448,6 +1812,8 @@ class TermoLoad(App):
                     self.settings["max_speed_kb"] = 0
                 
                 self.settings["shutdown_on_complete"] = shutdown_checkbox.value
+                self.settings["sound_on_complete"] = sound_complete_checkbox.value
+                self.settings["sound_on_error"] = sound_error_checkbox.value
                 self.save_settings()
 
             except Exception:
@@ -1567,12 +1933,38 @@ class TermoLoad(App):
         lines = []
         lines.append("TermoLoad — Help / Reference\n")
         lines.append("Controls\n--------")
-        lines.append("a  Add Download\nq  Quit\nArrow keys select rows on Downloads tab")
+        lines.append("a  Add Download\nq  Quit\nm  Minimize to Tray\nArrow keys select rows on Downloads tab")
+        lines.append("")
+        lines.append("Magnet Links & Torrents\n-----------------------")
+        lines.append("✓ Full torrent support via libtorrent-python")
+        lines.append("- Supports .torrent files, magnet links, and torrent URLs")
+        lines.append("- Names are extracted from magnet links (dn parameter)")
+        lines.append("- Shows real-time peer/seed count and download speed")
+        lines.append("- DHT, PEX, and tracker support enabled")
+        lines.append("- Pause/resume works for torrents")
+        lines.append("")
+        lines.append("Supported Download Types\n------------------------")
+        lines.append("✓ HTTP/HTTPS direct downloads (with resume support)")
+        lines.append("✓ YouTube videos (requires yt-dlp)")
+        lines.append("✓ Torrents (magnet links, .torrent files)")
+        lines.append("")
+        lines.append("Peers/Seeds Column\n------------------")
+        lines.append("For torrent downloads, shows peer and seed count:")
+        lines.append("- Format: peers↓/seeds↑ (e.g., '5↓/12↑' means 5 peers, 12 seeds)")
+        lines.append("- 'Connecting...' - Searching for peers")
+        lines.append("- 'Waiting...' - Torrent queued but not started")
+        lines.append("- '--' - Not a torrent (URL/Video download)")
         lines.append("")
         lines.append("Common statuses\n----------------")
         lines.append("Downloading  Transfer in progress\nPaused       Task paused or canceled\nQueued       Waiting to start\nCompleted    Finished successfully\nProcessing   Video post-processing (yt-dlp/ffmpeg)")
         lines.append("")
-        # Dynamic error list collected from current downloads
+        lines.append("Notification Sounds\n-------------------")
+        lines.append("TermoLoad can play sounds when downloads complete or encounter errors.")
+        lines.append("Enable/disable in Settings:")
+        lines.append("- Completion sound: Pleasant ascending beep when download finishes")
+        lines.append("- Error sound: Lower descending beep when download fails")
+        lines.append("Both are enabled by default. Sounds play in the background.")
+        lines.append("")
         try:
             errs = self._collect_current_errors()
         except Exception:
@@ -1819,6 +2211,9 @@ class TermoLoad(App):
 
     def _pause_download(self, download_id: int) -> None:
         try:
+            d = next((x for x in self.downloads if x.get("id") == download_id), None)
+            if d and d.get("type") == "Torrent":
+                self.downloader.pause_torrent(download_id)
             task = self.download_tasks.get(download_id)
             if task and not task.done():
                 task.cancel()
@@ -1866,7 +2261,10 @@ class TermoLoad(App):
                 pass
 
             d["status"] = "Queued"
-            if d.get("type") == "Video":
+            if d.get("type") == "Torrent":
+               logging.info(f"[TermoLoad] Starting Torrent Download :{name}")
+               task = asyncio.create_task(self.downloader.download_torrent(url, download_id, save_path))
+            elif d.get("type") == "Video":
                 task = asyncio.create_task(self.downloader.download_with_ytdlp(url, download_id, save_path, None))
             else:
                 task = asyncio.create_task(self.downloader.download_file(url, download_id, name, save_path))
@@ -1909,7 +2307,7 @@ class TermoLoad(App):
                 logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
                 new_id = len(self.downloads) + 1
                 is_torrent =(
-                    url.startwith("magnet:") or
+                    url.startswith("magnet:") or
                     url.endswith(".torrent") or
                     (os.path.isfile(url) and url.lower().endswith(".torrent"))
                 )
@@ -1917,8 +2315,18 @@ class TermoLoad(App):
                     d_type = "Torrent"
                     if os.path.isfile(url):
                         name = os.path.basename(url)
+                    elif url.startswith("magnet:"):
+                        extracted_name = RealDownloader.extract_magnet_name(url)
+                        if extracted_name:
+                            name = extracted_name
+                        else:
+                            name = f"magnet_torrent_{new_id}"
                     else:
-                        name = f"torrent_{new_id}"
+                        try:
+                            parsed_name = os.path.basename(urlparse(url).path)
+                            name = parsed_name if parsed_name else f"torrent_{new_id}"
+                        except Exception:
+                            name = f"torrent_{new_id}"
                 else:
                     d_type = "URL"
                     try:
@@ -1941,9 +2349,30 @@ class TermoLoad(App):
                     "progress": 0.0,
                     "speed": "0 B/s",
                     "status": "Queued" if d_type != "Torrent" else "Pending",
-                    "eta": "--"
+                    "eta": "--",
+                    "peers": 0,
+                    "seeds": 0
                 }
+                
+                if d_type == "Torrent":
+                    logging.info(f"[TermoLoad] Queuing torrent download {url}")
+                    logging.info(f"[TermoLoad] Starting torrent download {new_id} -> {url} -> {custom_path}")
+                    for d in self.downloads:
+                        if d.get("id") == new_id:
+                            d["status"] = "Pending"
+                            break
+                    try:
+                        task = asyncio.create_task(
+                            self.downloader.download_torrent(url, new_id, custom_path)
+                        )
+                        self.download_tasks[new_id] = task
+                        logging.info(f"[TermoLoad] Created asyncio task for torrent download {new_id}")
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] Failed to create torrent task: {ex}")
+                
                 logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
+                peers_seeds = "Waiting..." if d_type == "Torrent" else "--"
+                
                 try:
                     row_key = self.downloads_table.add_row(
                         str(new_entry["id"]),
@@ -1951,7 +2380,8 @@ class TermoLoad(App):
                         new_entry["name"],
                         "0.00%",
                         "0 B/s",
-                        "Queued",
+                        peers_seeds,
+                        new_entry["status"],
                         "--"
                     )
                 except Exception:
@@ -1963,6 +2393,7 @@ class TermoLoad(App):
                             new_entry["name"],
                             "0.00%",
                             "0 B/s",
+                            peers_seeds,
                             new_entry["status"],
                             "--"
                         )
@@ -2228,10 +2659,51 @@ class TermoLoad(App):
         except Exception:
             pass
 
+        # Cancel all download tasks
         for task in self.download_tasks.values():
             if not task.done():
                 task.cancel()
+        
+        # Clean up torrent session
+        try:
+            if self.downloader.torrent_session:
+                logging.info("[TermoLoad] Cleaning up torrent session...")
+                
+                # Pause all active torrents
+                for download_id, handle in list(self.downloader.torrent_handles.items()):
+                    try:
+                        logging.info(f"[TermoLoad] Pausing torrent {download_id}")
+                        handle.pause()
+                        
+                        # Save resume data for later
+                        try:
+                            if handle.need_save_resume_data():
+                                handle.save_resume_data()
+                        except Exception:
+                            pass
+                    except Exception:
+                        logging.exception(f"[TermoLoad] Failed to pause torrent {download_id}")
+                
+                # Wait a moment for resume data to be saved
+                await asyncio.sleep(0.5)
+                
+                # Pause the session
+                try:
+                    self.downloader.torrent_session.pause()
+                    logging.info("[TermoLoad] Libtorrent session paused successfully")
+                except Exception:
+                    logging.exception("[TermoLoad] Failed to pause torrent session")
+                
+                # Clear handles
+                self.downloader.torrent_handles.clear()
+                
+        except Exception:
+            logging.exception("[TermoLoad] Failed to cleanup torrent session")
+        
+        # Close HTTP session
         await self.downloader.close_session()
+        
+        logging.info("[TermoLoad] App unmounted successfully")
     
     async def _update_logs_panel(self):
         try:
@@ -2279,7 +2751,9 @@ class TermoLoad(App):
                         "eta": d.get("eta", "--"),
                         "downloaded_bytes": int(d.get("downloaded_bytes", 0) or 0),
                         "total_size": int(d.get("total_size", 0) or 0),
-                        "filepath": d.get("filepath", "")
+                        "filepath": d.get("filepath", ""),
+                        "peers": d.get("peers", 0),
+                        "seeds":d.get("seeds", 0)
                     }
                     for d in self.downloads
                 ]
@@ -2292,7 +2766,6 @@ class TermoLoad(App):
     def load_downloads_state(self) -> List[Dict[str, Any]]:
         path = self._state_file()
         if not path.exists():
-            # Backward compatibility: try legacy location in current working directory
             legacy = Path("downloads_state.json")
             if not legacy.exists():
                 return []
