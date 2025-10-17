@@ -21,9 +21,16 @@ import subprocess
 import logging
 import ctypes
 import winsound
-import libtorrent
 from collections import deque
 from typing import Optional, Dict, Any, List
+try:
+    import libtorrent
+    LIBTORRENT_AVAILABLE = True
+except (ImportError, OSError) as e:
+    libtorrent = None
+    LIBTORRENT_AVAILABLE = False
+    logging.warning(f"Libtorrent not available: {e}. Torrent downloads will be disabled.")
+
 try:
     import yt_dlp as ytdlp
 except Exception:
@@ -60,46 +67,69 @@ class RealDownloader:
         super().__init__()
         self.app = app_instance
         self.session = None
-        self.torrent_session: None
+        self.torrent_session = None
         self.torrent_handles = {}
 
     def start_torrent_session(self):
-        if self.torrent_session is None:
+        if self.torrent_session is None and LIBTORRENT_AVAILABLE:
             try:
-                settings={
-                    'user_agen': 'TermoLoad/1.0 libtorrent/'+libtorrent.version,
+                import libtorrent as lt
+                
+                # Create session with comprehensive settings
+                settings = {
                     'listen_interfaces': '0.0.0.0:6881',
                     'enable_dht': True,
                     'enable_lsd': True,
                     'enable_upnp': True,
                     'enable_natpmp': True,
+                    'announce_to_all_trackers': True,
+                    'announce_to_all_tiers': True,
+                    'user_agent': 'TermoLoad/1.0',
                 }
-                self.torrent_session.apply_settings(settings)
+                self.torrent_session = lt.session(settings)
+                
+                # Start DHT bootstrap
                 self.torrent_session.add_dht_router("router.bittorrent.com", 6881)
                 self.torrent_session.add_dht_router("router.utorrent.com", 6881)
                 self.torrent_session.add_dht_router("dht.transmissionbt.com", 6881)
-                logging.info("[TermoLoad] Torrent session started")
+                self.torrent_session.add_dht_router("dht.libtorrent.org", 25401)
+                
+                logging.info("[TermoLoad] Torrent session started with DHT, LSD, UPnP, NAT-PMP enabled")
             except Exception as e:
                 logging.exception(f"[TermoLoad] Failed to start session: {e}")
                 self.torrent_session = None
     
     async def download_torrent(self, url:str,download_id:int, custom_path:str) -> bool:
         try:
+            if not LIBTORRENT_AVAILABLE:
+                self.update_download_progress(
+                    download_id, 0.0, 0, 0, "Error: Libtorrent not installed or DLL missing"
+                )
+                logging.error("[TermoLoad] Libtorrent unavailable - install Visual C++ Redistributables")
+                return False
+            
             if self.torrent_session is None:
                 self.start_torrent_session()
             
             if self.torrent_session is None:
                 self.update_download_progress(
-                    download_id, 0.0, 0, 0, "Error: Torrent session not available"
+                    download_id, 0.0, 0, 0, "Error: Torrent session failed to start"
                     )
                 return False
             
             save_path= Path(custom_path or "downloads")
             save_path.mkdir(parents=True, exist_ok=True)
 
+            # Configure torrent parameters with all necessary flags
             params={
                 'save_path': str(save_path),
                 'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
+                'flags': (
+                    libtorrent.torrent_flags.auto_managed |
+                    libtorrent.torrent_flags.duplicate_is_error |
+                    libtorrent.torrent_flags.update_subscribe |
+                    libtorrent.torrent_flags.apply_ip_filter
+                ),
             }
             if url.startswith("magnet:"):
                 logging.info(f"[TermoLoad] Adding magnet link: {url[:50]}")
@@ -110,7 +140,7 @@ class RealDownloader:
                 info = libtorrent.torrent_info(url)
                 params['ti'] = info
                 handle = self.torrent_session.add_torrent(params)
-            elif url.startswith("http://","https://") and url.endswith(".torrent"):
+            elif url.startswith(("http://","https://")) and url.endswith(".torrent"):
                 logging.info(f"[TermoLoad] Downloading torrent from: {url}")
                 await self.start_session()
                 async with self.session.get(url) as response:
@@ -139,6 +169,12 @@ class RealDownloader:
                 )
                 return
             self.torrent_handles[download_id] = handle
+            
+            # Resume the torrent and force DHT announce to find peers quickly
+            handle.resume()
+            handle.force_dht_announce()
+            
+            logging.info(f"[TermoLoad] Torrent handle resumed and DHT announce forced: {download_id}")
 
             try:
                 torrent_name = handle.status().name
@@ -149,7 +185,11 @@ class RealDownloader:
             except Exception:
                 pass
 
-            logging.info(f"[TermoLoad] Torrent added, starting download: {download_id}")
+            logging.info(f"[TermoLoad] Torrent added and active: {download_id}")
+            
+            # Track iterations for periodic logging
+            iteration = 0
+            
             while True:
                 if download_id not in self.torrent_handles:
                     logging.info(f"[TermoLoad] Torrent download cancelled: {download_id}")
@@ -159,6 +199,7 @@ class RealDownloader:
                 except Exception:
                     break
                 
+                iteration += 1
                 state = status.state
                 progress = status.progress
                 download_rate = status.download_rate
@@ -166,6 +207,10 @@ class RealDownloader:
                 downloaded = status.total_wanted_done
                 num_peers = status.num_peers
                 num_seeds = status.num_seeds
+                
+                # Log peer connection status every 10 seconds
+                if iteration % 10 == 1:
+                    logging.info(f"[TermoLoad] Torrent {download_id}: peers={num_peers}, seeds={num_seeds}, state={state}, progress={progress:.2%}, rate={download_rate/1024:.1f}KB/s")
 
                 if download_rate > 0:
                     remaining = total_size - downloaded
@@ -184,7 +229,8 @@ class RealDownloader:
                 except Exception:
                     pass
                 
-                if state == libtorrent.torrent_status.seeding:
+                # Map libtorrent states to readable status
+                if state == libtorrent.torrent_status.checking_files:
                     status_text = "Checking Files"
                 elif state == libtorrent.torrent_status.downloading_metadata:
                     status_text = "Downloading Metadata"
@@ -196,8 +242,10 @@ class RealDownloader:
                     status_text = "Seeding"
                 elif state == libtorrent.torrent_status.allocating:
                     status_text = "Allocating"
+                elif state == libtorrent.torrent_status.checking_resume_data:
+                    status_text = "Checking Resume Data"
                 else:
-                    status_text=f"State {state}"
+                    status_text = f"State {state}"
 
                 self.update_download_progress(
                     download_id,
@@ -263,6 +311,9 @@ class RealDownloader:
                 logging.info(f"[TermoLoad] Torrent paused: {download_id}")
         except Exception:
             logging.exception(f"[TermoLoad] Failed to pause torrent {download_id}")
+
+    def pause_torrent(self,download_id:int):
+        self.stop_torrent(download_id)
 
     def remove_torrent(self,download_id:int):
         try:
@@ -1936,7 +1987,12 @@ class TermoLoad(App):
         lines.append("a  Add Download\nq  Quit\nm  Minimize to Tray\nArrow keys select rows on Downloads tab")
         lines.append("")
         lines.append("Magnet Links & Torrents\n-----------------------")
-        lines.append("✓ Full torrent support via libtorrent-python")
+        if LIBTORRENT_AVAILABLE:
+            lines.append("✓ Full torrent support via libtorrent")
+        else:
+            lines.append("⚠ Torrent support unavailable - libtorrent not loaded")
+            lines.append("  To enable: Install Microsoft Visual C++ Redistributable")
+            lines.append("  Download: https://aka.ms/vs/17/release/vc_redist.x64.exe")
         lines.append("- Supports .torrent files, magnet links, and torrent URLs")
         lines.append("- Names are extracted from magnet links (dn parameter)")
         lines.append("- Shows real-time peer/seed count and download speed")
@@ -2355,6 +2411,16 @@ class TermoLoad(App):
                 }
                 
                 if d_type == "Torrent":
+                    # Check if libtorrent is available
+                    if not LIBTORRENT_AVAILABLE:
+                        self.notify(
+                            "Torrent downloads unavailable. Install Visual C++ Redistributables.",
+                            severity="error",
+                            timeout=5
+                        )
+                        logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
+                        return
+                    
                     logging.info(f"[TermoLoad] Queuing torrent download {url}")
                     logging.info(f"[TermoLoad] Starting torrent download {new_id} -> {url} -> {custom_path}")
                     for d in self.downloads:
