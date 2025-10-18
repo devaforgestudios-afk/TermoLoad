@@ -16,6 +16,7 @@ import time
 import tkinter as tk
 import tkinter.filedialog
 import pystray
+import shutil
 import sys
 import subprocess
 import logging
@@ -1379,7 +1380,6 @@ class TermoLoad(App):
                 yield Button("Resume Selected", id="btn_resume_sel")
                 yield Button("Pause All", id="btn_pause_all")
                 yield Button("Resume All", id="btn_resume_all")
-                yield Button("Delete File", id="btn_delete_file", variant="error")
                 yield Button("Remove From List", id="button_remove_list")
                 yield Button("Delete + Remove",id="btn_delete_and_remove", variant="error")
             yield DataTable(id="downloads_table")
@@ -2184,9 +2184,6 @@ class TermoLoad(App):
         if event.button.id == "btn_pause_all":
             self._pause_all()
             return
-        if event.button.id == "btn_delete_file":
-            asyncio.create_task(self._delete_selected_file_async(delete_partials=True, remove_from_list=False))
-            return
         if event.button.id == "button_remove_list":
             self._remove_selected_from_list()
             return
@@ -2593,10 +2590,15 @@ class TermoLoad(App):
             main_path = self._resolve_download_path(d)
             if main_path and main_path.exists():
                 try:
-                    main_path.unlink()
-                    deleted += 1
+                    # If it's a directory (e.g., torrent save folder), remove recursively
+                    if main_path.is_dir():
+                        shutil.rmtree(main_path)
+                        deleted += 1
+                    else:
+                        main_path.unlink()
+                        deleted += 1
                 except Exception:
-                    logging.exception(f"[TermoLoad] failed to delete file: {main_path}")
+                    logging.exception(f"[TermoLoad] failed to delete file/directory: {main_path}")
             if delete_partials and main_path:
                 candidates = [
                     Path(str(main_path) + ".part"),
@@ -2612,6 +2614,18 @@ class TermoLoad(App):
                             deleted += 1
                     except Exception:
                         pass
+            # For torrents, also attempt to remove the containing folder if empty
+            if d.get("type") == "Torrent" and main_path:
+                parent = main_path.parent
+                # Only remove the parent directory if it's inside the download folder and is empty
+                download_folder = Path(d.get("path") or self.settings.get("download_folder", "downloads"))
+                try:
+                    if parent != download_folder and str(parent).startswith(str(download_folder)):
+                        # Attempt remove if empty
+                        if parent.exists() and not any(parent.iterdir()):
+                            parent.rmdir()
+                except Exception:
+                    pass
         except Exception:
             logging.exception("[TermoLoad] _delete_download_files unexpected error")
         return deleted
@@ -2673,8 +2687,30 @@ class TermoLoad(App):
         try:
             task = self.download_tasks.get(did)
             if task and not task.done():
+                # Cancel running asyncio task
                 task.cancel()
                 await asyncio.sleep(0)
+        except Exception:
+            pass
+        # If it's a torrent, attempt to stop/remove the torrent handle so files can be deleted
+        try:
+            d_type = d.get("type")
+            if d_type == "Torrent":
+                try:
+                    # Ask downloader to remove torrent handle
+                    try:
+                        self.downloader.remove_torrent(did)
+                    except Exception:
+                        pass
+                    # also remove from downloader.torrent_handles if present
+                    try:
+                        self.downloader.torrent_handles.pop(did, None)
+                    except Exception:
+                        pass
+                    # small delay to allow libtorrent to release file handles
+                    await asyncio.sleep(0.2)
+                except Exception:
+                    pass
         except Exception:
             pass
         try:
@@ -2837,37 +2873,11 @@ class TermoLoad(App):
                     "path": custom_path,
                     "progress": 0.0,
                     "speed": "0 B/s",
-                    "status": "Queued" if d_type != "Torrent" else "Pending",
+                    "status": "Queued",
                     "eta": "--",
                     "peers": 0,
                     "seeds": 0
                 }
-                
-                if d_type == "Torrent":
-                    # Check if libtorrent is available
-                    if not LIBTORRENT_AVAILABLE:
-                        self.notify(
-                            "Torrent downloads unavailable. Install Visual C++ Redistributables.",
-                            severity="error",
-                            timeout=5
-                        )
-                        logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
-                        return
-                    
-                    logging.info(f"[TermoLoad] Queuing torrent download {url}")
-                    logging.info(f"[TermoLoad] Starting torrent download {new_id} -> {url} -> {custom_path}")
-                    for d in self.downloads:
-                        if d.get("id") == new_id:
-                            d["status"] = "Pending"
-                            break
-                    try:
-                        task = asyncio.create_task(
-                            self.downloader.download_torrent(url, new_id, custom_path)
-                        )
-                        self.download_tasks[new_id] = task
-                        logging.info(f"[TermoLoad] Created asyncio task for torrent download {new_id}")
-                    except Exception as ex:
-                        logging.exception(f"[TermoLoad] Failed to create torrent task: {ex}")
                 
                 logging.info(f"[TermoLoad] on_screen_dismissed: new_entry={new_entry}")
                 peers_seeds = "Waiting..." if d_type == "Torrent" else "--"
@@ -2928,12 +2938,29 @@ class TermoLoad(App):
                     self.help_panel.display = False
                 except Exception:
                     pass
+                
+                # Start the download task based on type
                 if d_type == "Torrent":
-                    logging.info(f"[TermoLoad] Queuing torrent download {url}")
-                    for d in self.downloads:
-                        if d.get("id") == new_id:
-                            d["status"] = "Pending"
-                            break
+                    # Check if libtorrent is available
+                    if not LIBTORRENT_AVAILABLE:
+                        self.notify(
+                            "Torrent downloads unavailable. Install Visual C++ Redistributables.",
+                            severity="error",
+                            timeout=5
+                        )
+                        logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
+                        return
+                    
+                    logging.info(f"[TermoLoad] Starting torrent download {new_id} -> {url} -> {custom_path}")
+                    try:
+                        task = asyncio.create_task(
+                            self.downloader.download_torrent(url, new_id, custom_path)
+                        )
+                        self.download_tasks[new_id] = task
+                        logging.info(f"[TermoLoad] Created asyncio task for torrent download {new_id}")
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] Failed to create torrent task: {ex}")
+                        
                 elif d_type == "URL":
                     logging.info(f"[TermoLoad] Queuing download {new_id} -> {url} -> {custom_path}")
                     try:
@@ -3117,10 +3144,28 @@ class TermoLoad(App):
                 pass
             if d_type == "Torrent":
                 logging.info(f"[TermoLoad] Torrent detected: {url}")
-                for d in self.downloads:
-                    if d.get("id") == new_id:
-                        d["status"] = "Pending"
-                        break
+                # Start torrent task immediately (auto-start)
+                if not LIBTORRENT_AVAILABLE:
+                    self.notify(
+                        "Torrent downloads unavailable. Install Visual C++ Redistributables.",
+                        severity="error",
+                        timeout=5
+                    )
+                    logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
+                else:
+                    try:
+                        # mark as queued and create asyncio task
+                        for d in self.downloads:
+                            if d.get("id") == new_id:
+                                d["status"] = "Queued"
+                                break
+                        task = asyncio.create_task(
+                            self.downloader.download_torrent(url, new_id, custom_path)
+                        )
+                        self.download_tasks[new_id] = task
+                        logging.info(f"[TermoLoad] process_modal_result: Created asyncio task for torrent {new_id}")
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] process_modal_result: Failed to create torrent task: {ex}")
             elif d_type == "URL":
                 logging.info(f"[TermoLoad] process_modal_result: Queuing download {new_id} -> {url} -> {custom_path}")
                 try:
