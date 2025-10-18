@@ -2,6 +2,8 @@
   "download_folder": "E:\\TermoLoad\\download",
   "concurrent": 3,
   "max_speed_kb": 0,
-  "shutdown_on_complete": true,
-  "allow_real_shutdown": true
+  "shutdown_on_complete": false,
+  "allow_real_shutdown": true,
+  "sound_on_complete": true,
+  "sound_on_error": true
 }

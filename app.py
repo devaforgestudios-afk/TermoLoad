@@ -30,7 +30,7 @@ class DownloadHistory:
         self.history_file = Path.home() / ".termoload_history.json"
         self.history = self.load_history()
 
-    def load_historu(self) -> List[Dict[str, Any]]:
+    def load_history(self) -> List[Dict[str, Any]]:
         if not self.history_file.exists():
             return []
         try:
@@ -68,7 +68,7 @@ class DownloadHistory:
             logging.exception("[TermoLoad] Failed to add history entry")
     
     def get_statistics(self)-> Dict[str, Any]:
-       try:
+        try:
             total = len(self.history)
             completed = sum(1 for h in self.history if h.get("status") == "completed")
             failed = sum(1 for h in self.history if h.get("status") == "failed")
@@ -77,11 +77,32 @@ class DownloadHistory:
             total_size = sum(h.get("size", 0) for h in self.history if h.get("status") == "completed")
             total_downloaded = sum(h.get("downloaded", 0) for h in self.history)
 
-
-
-
-
-
+            types={}
+            for h in self.history:
+                t = h.get("type","unknown")
+                types[t] = types.get(t,0)+1
+            week_ago = time.time() - (7*24*3600)
+            recent = sum(1 for h in self.history if h.get("timestamp",0) > week_ago)
+            success_rate = (completed / total * 100) if total > 0 else 0
+            return{
+                "total_downloads": total,
+                "completed": completed,
+                "failed": failed,
+                "cancelled": cancelled,
+                "success_rate": success_rate,
+                "total_downloaded": total_downloaded,
+                "by_type": types,
+                "recent_week": recent
+            }
+        
+        except Exception:
+            logging.exception("[TermoLoad] Failed to compute statistics")
+            return {}
+    
+    def clear_history(self):
+            self.history = []
+            self.save_history()
+            logging.exception("[TermoLoad] Failed to clear history")
 try:
     import libtorrent
     LIBTORRENT_AVAILABLE = True
@@ -930,7 +951,14 @@ class RealDownloader:
                 prev_status = download.get("status")
                 download["status"] = status
                 
-                # Play notification sounds on status change
+                try:
+                    if status == "Completed" and prev_status != "Completed":
+                        self.app.history.add_entry(download, "completed")
+                    elif status.startswith("Error") and not prev_status.startswith("Error"):
+                        self.app.history.add_entry(download, "failed")
+                except Exception:
+                    pass
+
                 try:
                     if status == "Completed" and prev_status != "Completed":
                         self.app._play_completion_sound()
@@ -1133,13 +1161,60 @@ class PathSelectModel(ModalScreen[str]):
             except:
                 pass
 class TermoLoad(App):
-    BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download"),("m","minimize_to_tray","Minimize to Tray")]
+    BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download"),("m","minimize_to_tray","Minimize to Tray"),("o","open_folder","Open Folder")]
 
     CSS = """
     AddDownloadModal {
         align: center middle;
         }
     
+    #history_panel{
+        height: 100%;
+        width: 100%;
+        padding: 1 2;
+        background: $surface;
+    }
+
+    #history_title{
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        padding: 1;
+    }
+
+    #history_toolbar{
+        padding: 0 0 1 0;
+    }
+
+    #history_toolbar Button{
+        margin-right: 1;
+    }
+    
+    #history_table{
+        height: 1fr;
+    }
+
+    #stats_panel{
+        height: 100%;
+        width: 100%;
+        padding: 1 2;
+        background: $surface;
+        overflow-y: auto;
+    }
+
+
+    #stats_title{
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        padding: 1;
+    }
+    
+    #stats_content{
+        padding: 1;
+        color: $text;
+    }
+
     #modal_container{
         width: 45%;
         height: 70%;
@@ -1252,6 +1327,7 @@ class TermoLoad(App):
         self.tray_icon = None
         self.tray_thread = None
         self._minimized_to_tray = False
+        self.history= DownloadHistory(self)
         
     
     def compose(self) -> ComposeResult:
@@ -1260,6 +1336,8 @@ class TermoLoad(App):
         with Horizontal(id="navbar"):
             yield Button("+ Add Download", id="btn_add", variant="success")
             yield Button("Downloads", id="btn_downloads", variant="primary")
+            yield Button("History", id="btn_history")
+            yield Button("Stats", id="btn_stats")
             yield Button("Settings", id="btn_settings")
             yield Button("Logs", id="btn_logs")
             yield Button("Help", id="btn_help")
@@ -1276,7 +1354,6 @@ class TermoLoad(App):
                 yield Input(id="settings_concurrent", placeholder="3")
                 yield Label("Max download speed (KB/s, 0 = unlimited):")
                 yield Input(id="settings_speed", placeholder="0")
-
                 yield Checkbox("Shutdown PC when all downloads complete (WARNING: Real shutdown!)", id="settings_shutdown")
                 yield Checkbox("Play sound on download completion", id="settings_sound_complete")
                 yield Checkbox("Play sound on download error", id="settings_sound_error")
@@ -1284,6 +1361,18 @@ class TermoLoad(App):
                 with Horizontal():
                     yield Button("Cancel", id="settings_cancel", variant="default")
                     yield Button("Save Settings", id="settings_save", variant="primary")
+
+            with Vertical(id="history_panel"):
+                yield Static("📜 Download History", id="history_title")
+                with Horizontal(id="history_toolbar"):
+                    yield Button("Clear History", id="btn_clear_history", variant="error")
+                    yield Button("Export CSV", id="btn_export_csv", variant="default")
+                yield DataTable(id="history_table")
+
+            with Vertical(id="stats_panel"):
+                yield Static("📊 Download Statistics", id="stats_title")
+                yield Static("",id="stats_content")
+
             yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
             with Horizontal(id="downloads_toolbar"):
                 yield Button("Pause Selected", id="btn_pause_sel")
@@ -1341,6 +1430,43 @@ class TermoLoad(App):
                 logging.debug("[TermoLoad] Failed to play error sound")
         
         threading.Thread(target=_play, daemon=True).start()
+    def action_open_folder(self) -> None:
+        try:
+            d = self._get_selected_download()
+            if not d:
+                self.notify("No download selected to open folder.",severity="warning")
+                return
+            
+            status = d.get("status","")
+            filepath = self._resolve_download_path(d)
+            if not filepath or not filepath.exists():
+                self.notify("Downloaded file not found.",severity="error")
+                logging.warning(f"[TermoLoad] File not found to open folder {filepath}")
+                return
+
+            folder_path = filepath.parent
+            try:
+                if sys.platform == 'win32':
+                    subprocess.Popen(["explorer","/select,",str(filepath)])
+                    logging.info(f"[TermoLoad] Opened folder (Windows) {folder_path}")
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(["open","-R",str(filepath)])
+                    logging.info(f"[TermoLoad] Opened folder (macOS) {folder_path}")
+                else:
+                    subprocess.Popen(["xdg-open",str(folder_path)])
+                    logging.info(f"[TermoLoad] Opened folder (Linux) {folder_path}")
+
+                self.notify(f"Opened folder: {folder_path.name}",severity="information")
+           
+            except Exception as e:
+                logging.exception(f"[TermoLoad] Failed to open folder {folder_path}: {e}")
+                self.notify("Failed to open folder:",severity="error")
+        
+        except Exception:
+            logging.exception("[TermoLoad] action_open_folder exception")
+            self.notify("Failed to open folder:",severity="error")
+
+
 
     def _setup_tray_icon(self):
         if pystray is None:
@@ -1470,6 +1596,138 @@ class TermoLoad(App):
 
                 
 
+    def populate_history_table(self):
+        try:
+            self.history_table.clear()
+
+            for entry in reversed(self.history.history):
+                try:
+                    date = entry.get("date", "Unknown")
+                    name = entry.get("name", "Unknown")[:40]  # Truncate long names
+                    dtype = entry.get("type", "Unknown")
+                    size = entry.get("size", 0)
+                    status = entry.get("status", "unknown")
+
+                    if size < 1024:
+                        size_str = f"{size} B"
+                    elif size < 1024**2:
+                        size_str = f"{size/1024:.1f} KB"
+                    elif size < 1024**3:
+                        size_str = f"{size/(1024**2):.1f} MB"
+                    else:
+                        size_str = f"{size/(1024**3):.1f} GB"
+
+                    status_map = {
+                        "completed": "✅ Completed",
+                        "failed": "❌ Failed",
+                        "cancelled": "⏸️ Cancelled"
+                    }
+
+                    staus_display = status_map.get(status, status)
+
+                    self.history_table.add_row(date,
+                                                name,
+                                                dtype,
+                                                size_str,
+                                                staus_display
+                                                
+                    )
+                except Exception:
+                    logging.exception("[TermoLoad] Failed to add history entry to table")
+
+        except Exception:
+            logging.exception("[TermoLoad] Failed to populate history table")
+
+    
+    def build_stats_display(self) -> str:
+        try:
+            stats = self.history.get_statistics()
+
+            lines = []
+            lines.append("📊 Overall Statistics\n" + "="*50)
+            lines.append(f"Total Downloads: {stats.get('total_downloads', 0)}")
+            lines.append(f"✅ Completed: {stats.get('completed', 0)}")
+            lines.append(f"❌ Failed: {stats.get('failed', 0)}")
+            lines.append(f"⏸️ Cancelled: {stats.get('cancelled', 0)}")
+            lines.append(f"Success Rate: {stats.get('success_rate', 0):.1f}%")
+            lines.append("")
+            lines.append("📁 Data Transferred\n" + "="*50)
+            total_size = stats.get('total_size', 0)
+            total_dl = stats.get('total_downloaded', 0)
+
+            if total_size < 1024**3:
+                lines.append(f"Total Downloaded (Completed): {total_size/(1024**2):.1f} MB")
+            else:
+                lines.append(f"Total Downloaded (Completed): {total_size/(1024**3):.2f} GB")
+            
+            if total_dl < 1024**3:
+                lines.append(f"Total Downloaded (All): {total_dl/(1024**2):.1f} MB")
+            else:
+                lines.append(f"Total Downloaded (All): {total_dl/(1024**3):.2f} GB")
+            
+            lines.append("")
+
+            lines.append("📁 By Type\n" + "="*50)
+            by_type = stats.get('by_type', {})
+            for dtype, count in sorted(by_type.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"{dtype}: {count} downloads")
+            
+            lines.append("")
+            lines.append("🕐 Recent Activity\n" + "="*50)
+            lines.append(f"Last 7 days: {stats.get('recent_week', 0)} downloads")
+
+            active = len([d for d in self.downloads if d.get("status") == "Downloading"])
+            completed_session = len([d for d in self.downloads if d.get("status") == "Completed"])
+            lines.append(f"\nCurrent Session:")
+            lines.append(f"Active Downloads: {active}")
+            lines.append(f"Completed Downloads: {completed_session}")
+            lines.append(f"Total: {len(self.downloads)}")
+
+            return "\n".join(lines)
+        except Exception:
+            logging.exception("[TermoLoad] Failed to build stats display")
+            return "Failed to load statistics."
+    
+    def export_history_csv(self):
+        """Export download history to CSV file"""
+        try:
+            import csv
+            
+            # Open file dialog to choose save location
+            root = tk.Tk()
+            root.withdraw()
+            filepath = tkinter.filedialog.asksaveasfilename(
+                title="Export History",
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                initialfile="termoload_history.csv"
+            )
+            root.destroy()
+            
+            if not filepath:
+                return
+            
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Date", "Name", "Type", "Size (bytes)", "Status", "URL", "Error"])
+                
+                for entry in self.history.history:
+                    writer.writerow([
+                        entry.get("date", ""),
+                        entry.get("name", ""),
+                        entry.get("type", ""),
+                        entry.get("size", 0),
+                        entry.get("status", ""),
+                        entry.get("url", ""),
+                        entry.get("error", "")
+                    ])
+            
+            self.notify(f"History exported to {filepath}", severity="information", timeout=5)
+            logging.info(f"[TermoLoad] History exported to {filepath}")
+        except Exception:
+            logging.exception("[TermoLoad] Failed to export history")
+            self.notify("Failed to export history", severity="error")
+    
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
         self.downloads_toolbar = self.query_one("#downloads_toolbar", Horizontal)
@@ -1478,6 +1736,10 @@ class TermoLoad(App):
         self.help_panel = self.query_one("#help_panel", Static)
         self.status_info = self.query_one("#status_info", Static)
         self.no_downloads = self.query_one("#no_downloads", Static)
+        self.history_panel = self.query_one("#history_panel", Vertical)
+        self.history_table = self.query_one("#history_table", DataTable)
+        self.stats_panel = self.query_one("#stats_panel", Vertical)
+        self.stats_content = self.query_one("#stats_content", Static)
 
         self.settings_panel.visible = False
         self.settings_panel.display = False
@@ -1493,9 +1755,13 @@ class TermoLoad(App):
         self.downloads_table.display = False
         self.status_info.visible = False
         self.status_info.display = False
+        self.history_panel.visible = False
+        self.history_panel.display = False
+        self.stats_panel.visible = False
+        self.stats_panel.display = False
 
         self.downloads_table.add_columns("ID", "Type", "Name", "Progress", "Speed","Peers/Seeds", "Status", "ETA")
-        # Make row selection explicit and visible
+        self.history_table.add_columns("Date", "Name", "Type", "Size", "Status")
         try:
             self.downloads_table.cursor_type = "row"
             self.downloads_table.show_cursor = True
@@ -1507,7 +1773,6 @@ class TermoLoad(App):
         except Exception:
             logging.exception("[TermoLoad] failed to load settings")
 
-        # Populate initial Help content
         try:
             self.help_panel.update(self._build_help_text())
         except Exception:
@@ -1537,7 +1802,6 @@ class TermoLoad(App):
                     "seeds": entry.get("seeds", 0)
                 }
                 
-                # Format peer/seed display for table
                 peers_seeds = "--"
                 if d.get("type") == "Torrent":
                     peers = d.get("peers", 0)
@@ -1870,11 +2134,17 @@ class TermoLoad(App):
                 if sel is not None:
                     txt = self._explain_status(sel.get("status", ""))
                     self.status_info.update(txt)
+                    if sel.get("status") == "Completed":
+                        filepath = self._resolve_download_path(sel)
+                        if filepath and filepath.exists():
+                            folder_name = filepath.parent.name
+                            txt = f"✅ {txt} | 📁 Location: .../{folder_name}/"
+                    self.status_info.update(txt)
                 else:
-                    self.status_info.update("")
+                    self.status_info.update(txt)
+           
             except Exception:
                 pass
-                # If Help panel is currently visible, refresh it so new errors show up
             try:
                 if getattr(self.help_panel, 'visible', False):
                     self.help_panel.update(self._build_help_text())
@@ -1890,6 +2160,20 @@ class TermoLoad(App):
             return
         if event.button.id == "btn_minimize":
             self.minimize_to_tray()
+            return
+        if event.button.id == "btn_clear_history":
+            try:
+                self.history.clear_history()
+                self.populate_history_table()
+                self.notify("History cleared successfully !",severity="information")
+            except Exception:
+                self.notify("Failed to clear history.",severity="error")
+            return
+        if event.button.id == "btn_export_csv":
+            try:
+                self.export_history_csv()
+            except Exception:
+                self.notify("Failed to export history.",severity="error")
             return
         if event.button.id == "btn_pause_sel":
             self._pause_selected()
@@ -1961,7 +2245,7 @@ class TermoLoad(App):
             except Exception:
                 pass
 
-        if event.button.id in ("btn_downloads", "btn_settings", "btn_logs", "btn_help"):
+        if event.button.id in ("btn_downloads", "btn_history", "btn_stats", "btn_settings", "btn_logs", "btn_help"):
 
             self.downloads_table.visible = False
             self.downloads_table.display = False
@@ -1977,6 +2261,10 @@ class TermoLoad(App):
             self.logs_panel.display = False
             self.help_panel.visible = False
             self.help_panel.display = False
+            self.history_panel.visible = False
+            self.history_panel.display = False
+            self.stats_panel.visible = False
+            self.stats_panel.display = False
 
         if event.button.id == "btn_downloads":
             try:
@@ -2011,6 +2299,21 @@ class TermoLoad(App):
                     self.scroll_downloads_to_top()
                 except Exception:
                     pass
+        elif event.button.id == "btn_history":
+            try:
+                self.history_panel.visible = True
+                self.history_panel.display = True
+                self.populate_history_table()
+            except Exception:
+                pass
+        elif event.button.id == "btn_stats":
+            try:
+                self.stats_panel.visible = True
+                self.stats_panel.display = True
+                stats_text = self.build_stats_display()
+                self.stats_content.update(stats_text)
+            except Exception:
+                pass
         elif event.button.id == "btn_settings":
             try:
                 self.settings_panel.visible = True
@@ -2039,7 +2342,6 @@ class TermoLoad(App):
                     self.help_panel.update(self._build_help_text())
                 except Exception:
                     pass
-                # Hide status info when in Help view
                 try:
                     self.status_info.update("")
                 except Exception:
@@ -2048,11 +2350,42 @@ class TermoLoad(App):
                 pass
 
         self.refresh()
-
+    
+    def _export_history_csv(self):
+        try:
+            import csv
+            root = tk.Tk()
+            root.withdraw()
+            filepath = tkinter.Fieldialog.asksaveasfilename(
+                title="Export History as CSV",
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                initalfile="termoload_history.csv"
+            )
+            root.destroy()
+            if not filepath:
+                return
+            with open(filepath,"w",newline='',encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Date","Name","Type","Size (Bytes)","Status","URL","Error"])
+                for entry in self.history.history:
+                    writer.writerow([
+                        entry.get("date",""),
+                        entry.get("name",""),
+                        entry.get("type",""),
+                        entry.get("size",0),
+                        entry.get("status",""),
+                        entry.get("url",""),
+                        entry.get("error","")
+                    ])
+            self.notify(f"History exported to {filepath}",severity="information",timeout=5)
+            logging.info(f"[TermoLoad] History exported to {filepath}")
+        except Exception:
+            logging.exception("[TermoLoad] failed to export history to CSV")
+        
     def _get_selected_download(self) -> Optional[Dict[str, Any]]:
         try:
             dt = self.downloads_table
-            # Prefer row index; Textual's DataTable uses integer cursor_row for row selection
             if hasattr(dt, "cursor_row") and dt.cursor_row is not None:
                 idx = int(dt.cursor_row)
             elif hasattr(dt, "cursor_coordinate") and dt.cursor_coordinate is not None:
@@ -2069,7 +2402,18 @@ class TermoLoad(App):
         lines = []
         lines.append("TermoLoad — Help / Reference\n")
         lines.append("Controls\n--------")
-        lines.append("a  Add Download\nq  Quit\nm  Minimize to Tray\nArrow keys select rows on Downloads tab")
+        lines.append("a  Add Download")
+        lines.append("q  Quit")
+        lines.append("m  Minimize to Tray")
+        lines.append("o  Open Folder (for completed downloads)")
+        lines.append("Arrow keys select rows on Downloads tab")
+        lines.append("")
+        lines.append("Open Folder Feature\n-------------------")
+        lines.append("When you select a completed download and press 'o':")
+        lines.append("- Windows: Opens Explorer with the file highlighted")
+        lines.append("- macOS: Opens Finder with the file revealed")
+        lines.append("- Linux: Opens the folder in your default file manager")
+        lines.append("This works individually for each download, regardless of where it was saved.")
         lines.append("")
         lines.append("Magnet Links & Torrents\n-----------------------")
         if LIBTORRENT_AVAILABLE:
@@ -2187,7 +2531,6 @@ class TermoLoad(App):
         return out
 
     def _explain_status(self, status: str) -> str:
-        """Return one-line explanation for the given status string shown inline on Downloads tab."""
         if not status:
             return ""
         s = status.strip()
@@ -2225,7 +2568,7 @@ class TermoLoad(App):
         elif s == "Downloading":
             return "Downloading – Transfer in progress."
         elif s == "Completed":
-            return "Completed – File is ready."
+            return "Completed – File is ready. Press 'o' to open folder"
         return s
 
     def _resolve_download_path(self, d: dict) -> Optional[Path]:
@@ -2358,6 +2701,11 @@ class TermoLoad(App):
             task = self.download_tasks.get(download_id)
             if task and not task.done():
                 task.cancel()
+                if d and d.get("status") == "Downloading":
+                    try:
+                        self.history.add_entry(d , "cancelled")
+                    except Exception:
+                        pass
             for d in self.downloads:
                 if d.get("id") == download_id:
                     d["status"] = "Paused"
