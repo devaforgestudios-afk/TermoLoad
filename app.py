@@ -1,6 +1,15 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Static, Button, Input, Label, Checkbox
 from textual.containers import Container, Horizontal, Vertical
+
+# ScrollView location changes between textual versions; try both locations
+try:
+    from textual.widgets import ScrollView  # type: ignore
+except Exception:
+    try:
+        from textual.containers import ScrollView  # type: ignore
+    except Exception:
+        ScrollView = None
 from textual.screen import ModalScreen
 import random
 import asyncio
@@ -24,6 +33,96 @@ import ctypes
 import winsound
 from collections import deque
 from typing import Optional, Dict, Any, List
+import queue
+import concurrent.futures
+
+class TkinterDialogHelper:
+    """Thread-safe async helper for tkinter file dialogs to prevent EXE hanging."""
+    _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="TkDialog")
+    
+    @classmethod
+    def _run_dialog_in_thread(cls, dialog_func):
+        """Run a tkinter dialog in a separate thread to prevent blocking."""
+        def wrapper():
+            try:
+                # Create a fresh root for each dialog to prevent state issues
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                root.update()
+                
+                # Run the dialog
+                result = dialog_func(root)
+                
+                # Clean up
+                try:
+                    root.destroy()
+                except:
+                    pass
+                
+                return result
+            except Exception as e:
+                logging.exception(f"[TkinterHelper] Dialog error: {e}")
+                return None
+        
+        # Run in thread pool to avoid blocking
+        future = cls._executor.submit(wrapper)
+        try:
+            # Wait for result with timeout
+            return future.result(timeout=300)  # 5 minute timeout
+        except concurrent.futures.TimeoutError:
+            logging.error("[TkinterHelper] Dialog timeout")
+            return None
+        except Exception as e:
+            logging.exception(f"[TkinterHelper] Error running dialog: {e}")
+            return None
+    
+    @classmethod
+    def ask_open_filename(cls, title="Select File", filetypes=None):
+        """Thread-safe file open dialog that won't hang in EXE."""
+        def dialog_func(root):
+            return tkinter.filedialog.askopenfilename(
+                parent=root,
+                title=title,
+                filetypes=filetypes or [("All Files", "*.*")]
+            )
+        
+        result = cls._run_dialog_in_thread(dialog_func)
+        return result if result else None
+    
+    @classmethod
+    def ask_directory(cls, title="Select Folder"):
+        """Thread-safe directory selection dialog that won't hang in EXE."""
+        def dialog_func(root):
+            return tkinter.filedialog.askdirectory(
+                parent=root,
+                title=title
+            )
+        
+        result = cls._run_dialog_in_thread(dialog_func)
+        return result if result else None
+    
+    @classmethod
+    def ask_save_filename(cls, title="Save As", filetypes=None, defaultextension=""):
+        """Thread-safe save file dialog that won't hang in EXE."""
+        def dialog_func(root):
+            return tkinter.filedialog.asksaveasfilename(
+                parent=root,
+                title=title,
+                filetypes=filetypes or [("All Files", "*.*")],
+                defaultextension=defaultextension
+            )
+        
+        result = cls._run_dialog_in_thread(dialog_func)
+        return result if result else None
+    
+    @classmethod
+    def cleanup(cls):
+        """Clean up the thread pool."""
+        try:
+            cls._executor.shutdown(wait=False)
+        except Exception:
+            pass
 
 class DownloadHistory:
     def __init__(self,app_instance):
@@ -183,50 +282,39 @@ class RealDownloader:
             except Exception as e:
                 logging.exception(f"[TermoLoad] Failed to start torrent session: {e}")
     
-    async def download_torrent(self, url: str, download_id: int, custom_path: str) -> bool:
-        """Download torrent from magnet link, .torrent file, or URL"""
+    async def get_torrent_info(self, url: str, download_id: int) -> Optional[dict]:
+        """Fetch torrent metadata without starting download."""
         try:
             if not LIBTORRENT_AVAILABLE:
-                self.update_download_progress(
-                    download_id, 0.0, 0, 0, "Error: Libtorrent not available"
-                )
-                logging.error("[TermoLoad] Libtorrent unavailable")
-                return False
+                return None
             
-            # Initialize session if needed
             if self.torrent_session is None:
                 self.start_torrent_session()
             
             if self.torrent_session is None:
-                self.update_download_progress(
-                    download_id, 0.0, 0, 0, "Error: Failed to start torrent session"
-                )
-                return False
+                return None
             
-            save_path = Path(custom_path or "downloads")
-            save_path.mkdir(parents=True, exist_ok=True)
-            
-            # Prepare torrent parameters
             import libtorrent as lt
-            params = lt.add_torrent_params()
-            params.save_path = str(save_path)
             
-            # Add torrent based on type
+            # Prepare parameters
+            params = lt.add_torrent_params()
+            params.save_path = str(Path("temp_info"))
+            
+            # Parse based on type
             if url.startswith("magnet:"):
-                logging.info(f"[TermoLoad] Adding magnet link")
                 params = lt.parse_magnet_uri(url)
-                params.save_path = str(save_path)
+                params.save_path = str(Path("temp_info"))
+                params.flags |= lt.torrent_flags.upload_mode  # Don't download, just get metadata
             elif os.path.isfile(url):
-                logging.info(f"[TermoLoad] Adding torrent file: {url}")
                 info = lt.torrent_info(url)
                 params.ti = info
             elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
-                logging.info(f"[TermoLoad] Downloading .torrent from URL")
                 await self.start_session()
                 async with self.session.get(url) as response:
                     if response.status == 200:
                         torrent_data = await response.read()
-                        temp_file = save_path / f"temp_{download_id}.torrent"
+                        temp_file = Path("temp_info") / f"temp_{download_id}.torrent"
+                        temp_file.parent.mkdir(parents=True, exist_ok=True)
                         async with aiofiles.open(temp_file, "wb") as f:
                             await f.write(torrent_data)
                         info = lt.torrent_info(str(temp_file))
@@ -236,41 +324,185 @@ class RealDownloader:
                         except:
                             pass
                     else:
-                        self.update_download_progress(
-                            download_id, 0.0, 0, 0, f"Error: HTTP {response.status}"
-                        )
-                        return False
+                        return None
             else:
-                self.update_download_progress(
-                    download_id, 0.0, 0, 0, "Error: Invalid torrent source"
-                )
-                return False
+                return None
             
-            # Add torrent to session
+            # Add torrent temporarily to get info
             handle = self.torrent_session.add_torrent(params)
-            self.torrent_handles[download_id] = handle
             
-            logging.info(f"[TermoLoad] Torrent added to session: {download_id}")
-            
-            # Wait for metadata if it's a magnet link
+            # Wait for metadata if magnet
             if url.startswith("magnet:"):
-                self.update_download_progress(download_id, 0.0, 0, 0, "Fetching Metadata")
-                logging.info(f"[TermoLoad] Waiting for metadata...")
-                
-                for i in range(60):  # 60 second timeout
+                for i in range(60):
                     if not handle.is_valid():
                         break
                     status = handle.status()
                     if status.has_metadata:
-                        logging.info(f"[TermoLoad] Metadata received")
                         break
                     await asyncio.sleep(1)
                 
                 if not handle.status().has_metadata:
+                    self.torrent_session.remove_torrent(handle)
+                    return None
+            
+            # Extract file information
+            status = handle.status()
+            torrent_info_obj = handle.torrent_file()
+            
+            files_info = []
+            if torrent_info_obj:
+                for i in range(torrent_info_obj.num_files()):
+                    file_entry = torrent_info_obj.files().at(i)
+                    files_info.append({
+                        "index": i,
+                        "path": file_entry.path,
+                        "size": file_entry.size
+                    })
+            
+            result = {
+                "name": status.name if status.has_metadata else "Unknown",
+                "total_size": status.total_wanted,
+                "num_files": len(files_info),
+                "files": files_info,
+                "handle": handle  # Keep handle for later use
+            }
+            
+            # Don't remove handle yet - we'll use it for actual download
+            # Store temporarily
+            self.torrent_handles[f"temp_{download_id}"] = handle
+            
+            return result
+            
+        except Exception as e:
+            logging.exception(f"[TermoLoad] Failed to get torrent info: {e}")
+            return None
+
+    async def download_torrent(self, url: str, download_id: int, custom_path: str, selected_files: Optional[List[int]] = None) -> bool:
+        """Download torrent from magnet link, .torrent file, or URL with optional file selection."""
+        try:
+            if not LIBTORRENT_AVAILABLE:
+                self.update_download_progress(
+                    download_id, 0.0, 0, 0, "Error: Libtorrent not available"
+                )
+                logging.error("[TermoLoad] Libtorrent unavailable")
+                return False
+            
+            # Check if we have a temporary handle from info fetch
+            temp_key = f"temp_{download_id}"
+            handle = self.torrent_handles.pop(temp_key, None)
+            
+            if handle is None:
+                # Initialize session if needed
+                if self.torrent_session is None:
+                    self.start_torrent_session()
+                
+                if self.torrent_session is None:
                     self.update_download_progress(
-                        download_id, 0.0, 0, 0, "Error: Metadata timeout"
+                        download_id, 0.0, 0, 0, "Error: Failed to start torrent session"
                     )
                     return False
+                
+                save_path = Path(custom_path or "downloads")
+                save_path.mkdir(parents=True, exist_ok=True)
+                
+                # Prepare torrent parameters
+                import libtorrent as lt
+                params = lt.add_torrent_params()
+                params.save_path = str(save_path)
+                
+                # Add torrent based on type
+                if url.startswith("magnet:"):
+                    logging.info(f"[TermoLoad] Adding magnet link")
+                    params = lt.parse_magnet_uri(url)
+                    params.save_path = str(save_path)
+                elif os.path.isfile(url):
+                    logging.info(f"[TermoLoad] Adding torrent file: {url}")
+                    info = lt.torrent_info(url)
+                    params.ti = info
+                elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
+                    logging.info(f"[TermoLoad] Downloading .torrent from URL")
+                    await self.start_session()
+                    async with self.session.get(url) as response:
+                        if response.status == 200:
+                            torrent_data = await response.read()
+                            temp_file = save_path / f"temp_{download_id}.torrent"
+                            async with aiofiles.open(temp_file, "wb") as f:
+                                await f.write(torrent_data)
+                            info = lt.torrent_info(str(temp_file))
+                            params.ti = info
+                            try:
+                                temp_file.unlink()
+                            except:
+                                pass
+                        else:
+                            self.update_download_progress(
+                                download_id, 0.0, 0, 0, f"Error: HTTP {response.status}"
+                            )
+                            return False
+                else:
+                    self.update_download_progress(
+                        download_id, 0.0, 0, 0, "Error: Invalid torrent source"
+                    )
+                    return False
+                
+                # Add torrent to session
+                handle = self.torrent_session.add_torrent(params)
+                
+                # Wait for metadata if magnet
+                if url.startswith("magnet:"):
+                    self.update_download_progress(download_id, 0.0, 0, 0, "Fetching Metadata")
+                    logging.info(f"[TermoLoad] Waiting for metadata...")
+                    
+                    for i in range(60):
+                        if not handle.is_valid():
+                            break
+                        status = handle.status()
+                        if status.has_metadata:
+                            logging.info(f"[TermoLoad] Metadata received")
+                            break
+                        await asyncio.sleep(1)
+                    
+                    if not handle.status().has_metadata:
+                        self.update_download_progress(
+                            download_id, 0.0, 0, 0, "Error: Metadata timeout"
+                        )
+                        return False
+            else:
+                # Use existing handle from get_torrent_info
+                save_path = Path(custom_path or "downloads")
+                save_path.mkdir(parents=True, exist_ok=True)
+                # Move handle to correct save path
+                try:
+                    handle.move_storage(str(save_path))
+                except:
+                    pass
+                # Clear upload_mode flag if it was set
+                try:
+                    import libtorrent as lt
+                    handle.unset_flags(lt.torrent_flags.upload_mode)
+                except:
+                    pass
+            
+            # Apply file selection if specified
+            if selected_files is not None:
+                try:
+                    torrent_info_obj = handle.torrent_file()
+                    if torrent_info_obj:
+                        num_files = torrent_info_obj.num_files()
+                        # Set priority to 0 (don't download) for unselected files
+                        for i in range(num_files):
+                            if i in selected_files:
+                                handle.file_priority(i, 4)  # Normal priority
+                            else:
+                                handle.file_priority(i, 0)  # Don't download
+                        logging.info(f"[TermoLoad] Set file priorities: {len(selected_files)}/{num_files} files selected")
+                except Exception as e:
+                    logging.warning(f"[TermoLoad] Failed to set file priorities: {e}")
+            
+            # Store handle
+            self.torrent_handles[download_id] = handle
+            
+            logging.info(f"[TermoLoad] Torrent added to session: {download_id}")
             
             # Update torrent name
             try:
@@ -280,10 +512,21 @@ class RealDownloader:
                     for d in self.app.downloads:
                         if d.get("id") == download_id:
                             d["name"] = torrent_name
+                            # Add file selection info
+                            if selected_files is not None:
+                                torrent_info_obj = handle.torrent_file()
+                                d["selected_files"] = len(selected_files)
+                                d["total_files"] = torrent_info_obj.num_files() if torrent_info_obj else 0
                             break
                     logging.info(f"[TermoLoad] Torrent name: {torrent_name}")
             except Exception as e:
                 logging.warning(f"[TermoLoad] Could not get torrent name: {e}")
+            
+            # Resume download
+            try:
+                handle.resume()
+            except:
+                pass
             
             # Main download loop
             logging.info(f"[TermoLoad] Starting download loop for torrent {download_id}")
@@ -1101,31 +1344,39 @@ class AddDownloadModal(ModalScreen[dict]):
             self.dismiss(None)
 
         elif event.button.id == "browse_file":
-            try:
-                root = tk.Tk()
-                root.withdraw()
-                file_path = tkinter.filedialog.askopenfilename(
-                    title= "Select Torrent File",
-                    filetypes=[("Torrent Files", "*.torrent"), ("All Files", "*.*")]
-                )
-                if file_path:
-                    url_widget = self.query_one("#download_input", Input)
-                    url_widget.value = file_path
-                root.destroy()
-            except Exception:
-                pass
+            # Run dialog in background to prevent hanging
+            async def browse_file():
+                try:
+                    file_path = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: TkinterDialogHelper.ask_open_filename(
+                            title="Select Torrent File",
+                            filetypes=[("Torrent Files", "*.torrent"), ("All Files", "*.*")]
+                        )
+                    )
+                    if file_path:
+                        url_widget = self.query_one("#download_input", Input)
+                        url_widget.value = file_path
+                except Exception as e:
+                    logging.exception(f"[AddDownloadModal] Browse file error: {e}")
+            
+            asyncio.create_task(browse_file())
         
         elif event.button.id == "browse_folder":
-            try:
-                root = tk.Tk()
-                root.withdraw()
-                folder = tkinter.filedialog.askdirectory(title="Select Download folder")
-                if folder:
-                    path_widget = self.query_one("#save_path", Input)
-                    path_widget.value = folder
-                root.destroy()
-            except:
-                pass
+            # Run dialog in background to prevent hanging
+            async def browse_folder():
+                try:
+                    folder = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: TkinterDialogHelper.ask_directory(title="Select Download Folder")
+                    )
+                    if folder:
+                        path_widget = self.query_one("#save_path", Input)
+                        path_widget.value = folder
+                except Exception as e:
+                    logging.exception(f"[AddDownloadModal] Browse folder error: {e}")
+            
+            asyncio.create_task(browse_folder())
 
 class PathSelectModel(ModalScreen[str]):
     def compose(self) -> ComposeResult:
@@ -1151,16 +1402,227 @@ class PathSelectModel(ModalScreen[str]):
         elif event.button.id == "cancel_path":
             self.dismiss(None)
         elif event.button.id == "browse_btn":
-            try:
-                root = tk.Tk()
-                root.withdraw()
-                folder = tkinter.filedialog.askdirectory(title="Select Download Folder")
-                if folder:
-                    path_widget = self.query_one("#path_input", Input)
-                    path_widget.value = folder
-                root.destroy()
-            except:
-                pass
+            # Run dialog in background to prevent hanging in EXE
+            async def browse_folder():
+                try:
+                    folder = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: TkinterDialogHelper.ask_directory(title="Select Download Folder")
+                    )
+                    if folder:
+                        path_widget = self.query_one("#path_input", Input)
+                        path_widget.value = folder
+                except Exception as e:
+                    logging.exception(f"[PathSelectModel] Browse error: {e}")
+            
+            asyncio.create_task(browse_folder())
+
+class ConfirmDeleteModal(ModalScreen[bool]):
+    """Modal dialog to confirm file deletion."""
+    
+    def __init__(self, download_name: str):
+        super().__init__()
+        self.download_name = download_name
+    
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("⚠️ Confirm Delete + Remove", id="modal_title")
+            yield Static(f"Are you sure you want to DELETE the files and remove from list?", classes="confirm_message")
+            yield Static(f"Download: {self.download_name}", classes="confirm_details")
+            yield Static("This will permanently delete files from disk!", classes="confirm_warning")
+            
+            with Horizontal():
+                yield Button("Cancel", id="confirm_cancel", variant="default")
+                yield Button("Delete + Remove", id="confirm_delete", variant="error")
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm_delete":
+            self.dismiss(True)
+        elif event.button.id == "confirm_cancel":
+            self.dismiss(False) 
+class TorrentFileSelectModal(ModalScreen[dict]):
+    def __init__(self,torrent_info:dict):
+        super().__init__()
+        self.torrent_info = torrent_info
+        self.file_checkboxes = []
+    
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("Select Files to Download", id="modal_title")
+            yield Static(f"Torrent: {self.torrent_info.get('name','Unknown')}", classes="torrent_name")
+
+            total_size = self.torrent_info.get("total_size",0)
+            size_str = self.format_size(total_size)
+            yield Static(f"Total Size: {size_str} | Files: {len(self.torrent_info.get('files', []))}", classes="torrent_info")
+
+            with Vertical(id="file_list_container"):
+                yield Static("Select the files you want to download:", classes="file_list_header")
+            
+                for idx, file_info in enumerate(self.torrent_info.get('files', [])):
+                    file_path = file_info.get('path', f'file_{idx}')
+                    file_size = file_info.get('size', 0)
+                    size_str = self._format_size(file_size)
+
+                    with Horizontal(classes="file_item"):
+                        cb = Checkbox(f"{file_path} ({size_str})", id=f"file_cb_{idx}", value=True)
+                        yield cb
+                        self.file_checkboxes.append(cb)
+
+            with Horizontal(classes="selection_buttons"):
+                yield Button("Select All", id="select_all", variant="default")
+                yield Button("Deselect All", id="deselect_all", variant="default")
+            
+            with Horizontal():
+                yield Button("Cancel", id="cancel_select", variant="error")
+                yield Button("Download Selected", id="confirm_select", variant="success")
+    
+    def _format_size(self,size_bytes:int)-> str:
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024**2:
+            return f"{size_bytes/1024:.1f} KB"
+        elif size_bytes < 1024**3:
+            return f"{size_bytes/(1024**2):.1f} MB"
+        else:
+            return f"{size_bytes/(1024**3):.1f} GB"
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "select_all":
+            for cb in self.file_checkboxes:
+                cb.value = True
+            return
+    
+        elif event.button.id == "deselect_all":
+            for cb in self.file_checkboxes:
+                cb.value = False
+            return
+        
+        elif event.button.id == "confirm_select":
+            selected_files = []
+            for idx, cb in enumerate(self.file_checkboxes):
+                if cb.value:
+                    selected_files.append(idx)
+            
+            if not selected_files:
+                self.app.notify("Please select at least one file to download", severity="warning")
+                return
+            
+            self.dismiss({
+                "selected_files": selected_files,
+                "torrent_info": self.torrent_info
+            })
+        elif event.button.id == "cancel_select":
+            self.dismiss(None)
+
+
+class LoadingScreen(App):
+    """Beautiful loading/splash screen for TermoLoad"""
+    
+    CSS = """
+    Screen {
+        align: center middle;
+        background: $surface;
+    }
+    
+    #loading_container {
+        width: 60;
+        height: 20;
+        border: thick $primary;
+        background: $surface;
+        align: center middle;
+        padding: 2;
+    }
+    
+    #logo {
+        text-align: center;
+        color: $accent;
+        text-style: bold;
+        padding: 1;
+    }
+    
+    #tagline {
+        text-align: center;
+        color: $text;
+        padding: 1;
+    }
+    
+    #spinner {
+        text-align: center;
+        color: $primary;
+        text-style: bold;
+        padding: 1;
+    }
+    
+    #status {
+        text-align: center;
+        color: $text-muted;
+        padding: 1;
+    }
+    
+    #version {
+        text-align: center;
+        color: $text-muted;
+        padding: 1;
+    }
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.current_frame = 0
+        self.initialization_complete = False
+        
+    def compose(self) -> ComposeResult:
+        with Container(id="loading_container"):
+            yield Static(self._get_logo(), id="logo")
+            yield Static("Terminal-Based Download Manager", id="tagline")
+            yield Static(self.spinner_frames[0], id="spinner")
+            yield Static("Initializing application...", id="status")
+            yield Static("v1.0", id="version")
+    
+    def _get_logo(self) -> str:
+        return """
+╔╦╗╔═╗╦═╗╔╦╗╔═╗╦  ╔═╗╔═╗╔╦╗
+ ║ ║╣ ╠╦╝║║║║ ║║  ║ ║╠═╣ ║║
+ ╩ ╚═╝╩╚═╩ ╩╚═╝╩═╝╚═╝╩ ╩═╩╝
+        """
+    
+    async def on_mount(self) -> None:
+        """Start the loading animation"""
+        self.set_interval(0.1, self._update_spinner)
+        self.set_timer(0.5, self._update_status_initializing)
+        self.set_timer(1.0, self._update_status_loading_modules)
+        self.set_timer(1.5, self._update_status_preparing)
+        self.set_timer(2.0, self._complete_loading)
+    
+    def _update_spinner(self) -> None:
+        """Animate the spinner"""
+        if not self.initialization_complete:
+            self.current_frame = (self.current_frame + 1) % len(self.spinner_frames)
+            spinner = self.query_one("#spinner", Static)
+            spinner.update(self.spinner_frames[self.current_frame])
+    
+    def _update_status_initializing(self) -> None:
+        status = self.query_one("#status", Static)
+        status.update("Initializing download manager...")
+    
+    def _update_status_loading_modules(self) -> None:
+        status = self.query_one("#status", Static)
+        status.update("Loading modules and dependencies...")
+    
+    def _update_status_preparing(self) -> None:
+        status = self.query_one("#status", Static)
+        status.update("Preparing interface...")
+    
+    def _complete_loading(self) -> None:
+        """Mark loading as complete and prepare to exit"""
+        status = self.query_one("#status", Static)
+        status.update("Ready! ✓")
+        spinner = self.query_one("#spinner", Static)
+        spinner.update("✓")
+        self.initialization_complete = True
+        self.set_timer(0.5, self.exit)
+            
 class TermoLoad(App):
     BINDINGS = [("q", "quit", "Quit"),("a","add_download","Add Download"),("m","minimize_to_tray","Minimize to Tray"),("o","open_folder","Open Folder")]
 
@@ -1168,6 +1630,30 @@ class TermoLoad(App):
     AddDownloadModal {
         align: center middle;
         }
+    
+    ConfirmDeleteModal {
+        align: center middle;
+        }
+    
+    .confirm_message {
+        text-align: center;
+        padding: 1;
+        color: $text;
+    }
+    
+    .confirm_details {
+        text-align: center;
+        padding: 0 1 1 1;
+        color: $accent;
+        text-style: bold;
+    }
+    
+    .confirm_warning {
+        text-align: center;
+        padding: 1;
+        color: $error;
+        text-style: bold;
+    }
     
     #history_panel{
         height: 100%;
@@ -1245,6 +1731,21 @@ class TermoLoad(App):
         padding: 1 2;
         color: $text-muted;
     }
+    #downloads_table{
+        height: 1fr;
+        min-height: 20;
+        width: 100%;
+    }
+    #downloads_toolbar {
+        padding: 0 1 1 1;
+    }
+    #downloads_toolbar Button {
+        margin-right: 1;
+    }
+    #status_info{
+        padding: 0 1;
+        color: $warning;
+    }
     #settings_panel{
         height: 100%;
         width: 100%;
@@ -1298,16 +1799,6 @@ class TermoLoad(App):
     #browse_file:hover, #browse_folder:hover {
         background: $accent-darken-1;
     }
-    #downloads_toolbar {
-        padding: 0 1;
-    }
-    #downloads_toolbar Button {
-        margin-right: 1;
-    }
-    #status_info{
-        padding: 0 1;
-        color: $warning;
-    }
     #help_panel{
         height: 100%;
         width: 100%;
@@ -1319,6 +1810,56 @@ class TermoLoad(App):
         text-style: none;
         color: $text;
     }
+    #logs_panel{
+        height: 100%;
+        width: 100%;
+        overflow-y: auto;
+        padding: 1 2;
+        background: $surface;
+    }
+    .torrent_name {
+        text-align: center;
+        padding: 0 1 1 1;
+        color: $accent;
+        text-style: bold;
+    }
+    
+    .torrent_info {
+        text-align: center;
+        padding: 0 1 1 1;
+        color: $text-muted;
+    }
+    
+    .file_list_header {
+        padding: 1 0;
+        color: $text;
+        text-style: bold;
+    }
+    #file_list_container {
+        height: 30;
+        overflow-y: auto;
+        border: solid $primary;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    
+    .file_item {
+        padding: 0 0 1 0;
+        align: left middle;
+    }
+    
+    .file_item Checkbox {
+        width: 100%;
+    }
+    
+    .selection_buttons {
+        padding: 0 0 1 0;
+    }
+    
+    .selection_buttons Button {
+        margin-right: 1;
+    }
+    
     """
     
     def __init__(self):
@@ -1329,6 +1870,12 @@ class TermoLoad(App):
         self.tray_thread = None
         self._minimized_to_tray = False
         self.history= DownloadHistory(self)
+        # Help panel scrolling fallback when ScrollView isn't available
+        self._help_text_lines: List[str] = []
+        self._help_scroll: int = 0
+        # Track user interaction to prevent table updates from interfering
+        self._user_interacting = False
+        self._last_interaction_time = 0
         
     
     def compose(self) -> ComposeResult:
@@ -1345,6 +1892,19 @@ class TermoLoad(App):
             yield Button ("Minimize",id = "btn_minimize", variant="default")
 
         with Container(id="main"):
+            # Downloads section at the top - shown by default
+            yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
+            with Horizontal(id="downloads_toolbar"):
+                yield Button("Pause Selected", id="btn_pause_sel")
+                yield Button("Resume Selected", id="btn_resume_sel")
+                yield Button("Pause All", id="btn_pause_all")
+                yield Button("Resume All", id="btn_resume_all")
+                yield Button("Remove From List", id="button_remove_list")
+                yield Button("Delete + Remove",id="btn_delete_and_remove", variant="error")
+            yield DataTable(id="downloads_table")
+            yield Static("", id="status_info")
+            
+            # Other panels below (hidden by default)
             with Vertical(id="settings_panel"):
                 yield Static("⚙️ Settings", id="settings_title")
                 yield Label("Default download folder:")
@@ -1374,18 +1934,12 @@ class TermoLoad(App):
                 yield Static("📊 Download Statistics", id="stats_title")
                 yield Static("",id="stats_content")
 
-            yield Static("No downloads yet. Press 'a' or + Add Download to create one.", id="no_downloads")
-            with Horizontal(id="downloads_toolbar"):
-                yield Button("Pause Selected", id="btn_pause_sel")
-                yield Button("Resume Selected", id="btn_resume_sel")
-                yield Button("Pause All", id="btn_pause_all")
-                yield Button("Resume All", id="btn_resume_all")
-                yield Button("Remove From List", id="button_remove_list")
-                yield Button("Delete + Remove",id="btn_delete_and_remove", variant="error")
-            yield DataTable(id="downloads_table")
-            yield Static("", id="status_info")
             yield Static("📜 Logs will go here", id="logs_panel")
-            yield Static("❓ Help/About here", id="help_panel")
+            # Use ScrollView if available (some textual versions expose it in different modules)
+            if ScrollView is not None:
+                yield ScrollView(id="help_panel")
+            else:
+                yield Static("❓ Help/About here", id="help_panel")
 
         yield Footer()
     
@@ -1431,42 +1985,66 @@ class TermoLoad(App):
         
         threading.Thread(target=_play, daemon=True).start()
     def action_open_folder(self) -> None:
+        """Open the folder containing the downloaded file."""
         try:
             d = self._get_selected_download()
             if not d:
-                self.notify("No download selected to open folder.",severity="warning")
+                self.notify("No download selected to open folder.", severity="warning")
                 return
             
-            status = d.get("status","")
             filepath = self._resolve_download_path(d)
             if not filepath or not filepath.exists():
-                self.notify("Downloaded file not found.",severity="error")
-                logging.warning(f"[TermoLoad] File not found to open folder {filepath}")
+                self.notify("Downloaded file not found.", severity="error")
+                logging.warning(f"[TermoLoad] File not found to open folder: {filepath}")
                 return
 
             folder_path = filepath.parent
-            try:
-                if sys.platform == 'win32':
-                    subprocess.Popen(["explorer","/select,",str(filepath)])
-                    logging.info(f"[TermoLoad] Opened folder (Windows) {folder_path}")
-                elif sys.platform == 'darwin':
-                    subprocess.Popen(["open","-R",str(filepath)])
-                    logging.info(f"[TermoLoad] Opened folder (macOS) {folder_path}")
-                else:
-                    subprocess.Popen(["xdg-open",str(folder_path)])
-                    logging.info(f"[TermoLoad] Opened folder (Linux) {folder_path}")
-
-                self.notify(f"Opened folder: {folder_path.name}",severity="information")
+            
+            # Use threading to prevent UI blocking
+            def open_folder_thread():
+                try:
+                    if sys.platform == 'win32':
+                        # Use Windows explorer to select the file
+                        subprocess.Popen(['explorer', '/select,', str(filepath)], 
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+                        logging.info(f"[TermoLoad] Opened folder (Windows): {folder_path}")
+                    elif sys.platform == 'darwin':
+                        subprocess.Popen(['open', '-R', str(filepath)])
+                        logging.info(f"[TermoLoad] Opened folder (macOS): {folder_path}")
+                    else:
+                        subprocess.Popen(['xdg-open', str(folder_path)])
+                        logging.info(f"[TermoLoad] Opened folder (Linux): {folder_path}")
+                except Exception as e:
+                    logging.exception(f"[TermoLoad] Failed to open folder {folder_path}: {e}")
+            
+            # Run in separate thread to prevent blocking
+            thread = threading.Thread(target=open_folder_thread, daemon=True)
+            thread.start()
+            
+            self.notify(f"Opening folder: {folder_path.name}", severity="information")
            
-            except Exception as e:
-                logging.exception(f"[TermoLoad] Failed to open folder {folder_path}: {e}")
-                self.notify("Failed to open folder:",severity="error")
-        
-        except Exception:
-            logging.exception("[TermoLoad] action_open_folder exception")
-            self.notify("Failed to open folder:",severity="error")
+        except Exception as e:
+            logging.exception(f"[TermoLoad] action_open_folder exception: {e}")
+            self.notify("Failed to open folder", severity="error")
 
-
+    def _safe_update_table_cell(self, row_key, col, value):
+        """Safely update a table cell with error handling to prevent crashes."""
+        try:
+            if self.downloads_table and hasattr(self.downloads_table, 'update_cell'):
+                self.downloads_table.update_cell(row_key, col, value)
+        except Exception as e:
+            logging.debug(f"[TermoLoad] Failed to update table cell [{row_key}, {col}]: {e}")
+            # Don't crash on table update errors
+            pass
+    
+    def _safe_add_table_row(self, *args):
+        """Safely add a row to the table with error handling to prevent crashes."""
+        try:
+            if self.downloads_table and hasattr(self.downloads_table, 'add_row'):
+                return self.downloads_table.add_row(*args)
+        except Exception as e:
+            logging.debug(f"[TermoLoad] Failed to add table row: {e}")
+            return len(self.downloads)
 
     def _setup_tray_icon(self):
         if pystray is None:
@@ -1690,50 +2268,59 @@ class TermoLoad(App):
     
     def export_history_csv(self):
         """Export download history to CSV file"""
-        try:
-            import csv
-            
-            # Open file dialog to choose save location
-            root = tk.Tk()
-            root.withdraw()
-            filepath = tkinter.filedialog.asksaveasfilename(
-                title="Export History",
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                initialfile="termoload_history.csv"
-            )
-            root.destroy()
-            
-            if not filepath:
-                return
-            
-            with open(filepath, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Date", "Name", "Type", "Size (bytes)", "Status", "URL", "Error"])
+        async def do_export():
+            try:
+                import csv
                 
-                for entry in self.history.history:
-                    writer.writerow([
-                        entry.get("date", ""),
-                        entry.get("name", ""),
-                        entry.get("type", ""),
-                        entry.get("size", 0),
-                        entry.get("status", ""),
-                        entry.get("url", ""),
-                        entry.get("error", "")
-                    ])
-            
-            self.notify(f"History exported to {filepath}", severity="information", timeout=5)
-            logging.info(f"[TermoLoad] History exported to {filepath}")
-        except Exception:
-            logging.exception("[TermoLoad] Failed to export history")
-            self.notify("Failed to export history", severity="error")
+                # Use async executor to prevent hanging in EXE
+                filepath = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: TkinterDialogHelper.ask_save_filename(
+                        title="Export History",
+                        defaultextension=".csv",
+                        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+                    )
+                )
+                
+                if not filepath:
+                    return
+                
+                # Add .csv extension if not present
+                if not filepath.lower().endswith('.csv'):
+                    filepath += '.csv'
+                
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Date", "Name", "Type", "Size (bytes)", "Status", "URL", "Error"])
+                    
+                    for entry in self.history.history:
+                        writer.writerow([
+                            entry.get("date", ""),
+                            entry.get("name", ""),
+                            entry.get("type", ""),
+                            entry.get("size", 0),
+                            entry.get("status", ""),
+                            entry.get("url", ""),
+                            entry.get("error", "")
+                        ])
+                
+                self.notify(f"History exported successfully", severity="information", timeout=5)
+                logging.info(f"[TermoLoad] History exported to {filepath}")
+            except Exception:
+                logging.exception("[TermoLoad] Failed to export history")
+                self.notify("Failed to export history", severity="error")
+        
+        asyncio.create_task(do_export())
     
     async def on_mount(self) -> None:
         self.downloads_table = self.query_one("#downloads_table", DataTable)
         self.downloads_toolbar = self.query_one("#downloads_toolbar", Horizontal)
         self.settings_panel = self.query_one("#settings_panel", Vertical)
         self.logs_panel = self.query_one("#logs_panel", Static)
-        self.help_panel = self.query_one("#help_panel", Static)
+        if ScrollView is not None:
+            self.help_panel = self.query_one("#help_panel", ScrollView)
+        else:
+            self.help_panel = self.query_one("#help_panel", Static)
         self.status_info = self.query_one("#status_info", Static)
         self.no_downloads = self.query_one("#no_downloads", Static)
         self.history_panel = self.query_one("#history_panel", Vertical)
@@ -1774,7 +2361,8 @@ class TermoLoad(App):
             logging.exception("[TermoLoad] failed to load settings")
 
         try:
-            self.help_panel.update(self._build_help_text())
+            # Use the safe setter which handles ScrollView vs Static fallback
+            self._set_help_text()
         except Exception:
             pass
 
@@ -1932,13 +2520,24 @@ class TermoLoad(App):
 
     async def sync_table_from_downloads(self):
         try:
+            current_time = time.time()
+            if self._user_interacting and (current_time - self._last_interaction_time) < 3.0:
+                return
+            else:
+                self._user_interacting = False
+            
             rebuild_needed = False
             selected_index = None
+            selected_download_id = None
             try:
                 if hasattr(self.downloads_table, "cursor_row") and self.downloads_table.cursor_row is not None:
                     selected_index = int(self.downloads_table.cursor_row)
+                    if selected_index < len(self.downloads):
+                        selected_download_id = self.downloads[selected_index].get("id")
             except Exception:
                 selected_index = None
+            
+            # Try to update cells without rebuilding
             for i, d in enumerate(self.downloads):
                 try:
                     row_key = d.get("row_key", i)
@@ -2076,8 +2675,16 @@ class TermoLoad(App):
                             d['row_key'] = rk
                         except Exception:
                             d['row_key'] = None
+                    
+                    # Restore selection based on download ID if possible, otherwise use index
                     try:
-                        if selected_index is not None and self.downloads_table.row_count:
+                        if selected_download_id is not None:
+                            # Find the row with the selected download ID
+                            for idx, dl in enumerate(self.downloads):
+                                if dl.get("id") == selected_download_id:
+                                    self.downloads_table.cursor_row = idx
+                                    break
+                        elif selected_index is not None and self.downloads_table.row_count:
                             idx = max(0, min(selected_index, self.downloads_table.row_count - 1))
                             self.downloads_table.cursor_row = idx
                     except Exception:
@@ -2188,26 +2795,40 @@ class TermoLoad(App):
             self._remove_selected_from_list()
             return
         if event.button.id == "btn_delete_and_remove":
-            asyncio.create_task(self._delete_selected_file_async(delete_partials=True, remove_from_list=True))
+            # Show confirmation modal before deleting
+            try:
+                d = self._get_selected_download()
+                if not d:
+                    self.notify("No download selected to delete.", severity="warning")
+                    return
+                download_name = d.get("name", "Unknown")
+                self.push_screen(ConfirmDeleteModal(download_name), self._on_delete_confirmed)
+            except Exception as e:
+                logging.exception(f"[TermoLoad] Error showing delete confirmation: {e}")
             return
         if event.button.id == "btn_resume_all":
             self._resume_all()
             return
 
         if event.button.id == "settings_browse":
-            try:
-                root = tk.Tk()
-                root.withdraw()
-                folder = tkinter.filedialog.askdirectory(title="Select Default Download Folder")
-                if folder:
-                    try:
-                        folder_input = self.query_one("#settings_download_folder", Input)
-                        folder_input.value = folder
-                    except Exception:
-                        pass
-                root.destroy()
-            except Exception:
-                pass
+            # Run dialog in background to prevent hanging in EXE
+            async def browse_settings_folder():
+                try:
+                    folder = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: TkinterDialogHelper.ask_directory(title="Select Default Download Folder")
+                    )
+                    if folder:
+                        try:
+                            folder_input = self.query_one("#settings_download_folder", Input)
+                            folder_input.value = folder
+                        except Exception as e:
+                            logging.exception(f"[TermoLoad] Error setting folder input: {e}")
+                except Exception as e:
+                    logging.exception(f"[TermoLoad] Error in settings browse: {e}")
+            
+            asyncio.create_task(browse_settings_folder())
+            return
 
         if event.button.id == "settings_save":
             try:
@@ -2336,11 +2957,30 @@ class TermoLoad(App):
                 self.help_panel.visible = True
                 self.help_panel.display = True
                 try:
-                    self.help_panel.update(self._build_help_text())
+                    # Use the safe setter which handles ScrollView vs Static fallback
+                    self._set_help_text()
+                except Exception:
+                    try:
+                        # Last resort: direct update
+                        self.help_panel.update(self._build_help_text())
+                    except Exception:
+                        pass
+                try:
+                    self.status_info.update("")
                 except Exception:
                     pass
                 try:
-                    self.status_info.update("")
+                    # Try to give keyboard focus to the help panel so keys scroll it
+                    if hasattr(self, "set_focus"):
+                        # schedule for later to ensure widget is mounted
+                        try:
+                            self.call_later(lambda: self.set_focus(self.help_panel))
+                        except Exception:
+                            # fallback to direct call
+                            try:
+                                self.set_focus(self.help_panel)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
             except Exception:
@@ -2351,31 +2991,34 @@ class TermoLoad(App):
     def _export_history_csv(self):
         try:
             import csv
-            root = tk.Tk()
-            root.withdraw()
-            filepath = tkinter.Fieldialog.asksaveasfilename(
+            
+            filepath = TkinterDialogHelper.ask_save_filename(
                 title="Export History as CSV",
                 defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                initalfile="termoload_history.csv"
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
             )
-            root.destroy()
+            
             if not filepath:
                 return
-            with open(filepath,"w",newline='',encoding="utf-8") as f:
+            
+            # Ensure .csv extension
+            if not filepath.lower().endswith('.csv'):
+                filepath += '.csv'
+                
+            with open(filepath, "w", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Date","Name","Type","Size (Bytes)","Status","URL","Error"])
+                writer.writerow(["Date", "Name", "Type", "Size (Bytes)", "Status", "URL", "Error"])
                 for entry in self.history.history:
                     writer.writerow([
-                        entry.get("date",""),
-                        entry.get("name",""),
-                        entry.get("type",""),
-                        entry.get("size",0),
-                        entry.get("status",""),
-                        entry.get("url",""),
-                        entry.get("error","")
+                        entry.get("date", ""),
+                        entry.get("name", ""),
+                        entry.get("type", ""),
+                        entry.get("size", 0),
+                        entry.get("status", ""),
+                        entry.get("url", ""),
+                        entry.get("error", "")
                     ])
-            self.notify(f"History exported to {filepath}",severity="information",timeout=5)
+            self.notify(f"History exported to {filepath}", severity="information", timeout=5)
             logging.info(f"[TermoLoad] History exported to {filepath}")
         except Exception:
             logging.exception("[TermoLoad] failed to export history to CSV")
@@ -2509,11 +3152,169 @@ class TermoLoad(App):
         lines.append(f"- Logs tab shows the last 20 lines\n- Full log file: {LOG_FILE_PATH}\n- Download state is saved per-user: ~/downloads_state.json")
         return "\n".join(lines)
 
+    def _set_help_text(self) -> None:
+        txt = self._build_help_text()
+        if ScrollView is not None and isinstance(self.help_panel, ScrollView):
+            try:
+                self.help_panel.update(txt)
+            except Exception:
+                pass
+        else:
+            # Fallback to Static: store lines and render a page
+            self._help_text_lines = txt.split("\n")
+            self._help_scroll = 0
+            # compute a reasonable lines_per_page based on available panel height
+            lines_per_page = 25
+            try:
+                # If the help panel has a size attribute, try to use its height
+                h = None
+                if hasattr(self.help_panel, "size"):
+                    sz = getattr(self.help_panel, "size")
+                    # size may be a tuple (width, height) or an object with .height
+                    if isinstance(sz, tuple) and len(sz) >= 2:
+                        h = sz[1]
+                    else:
+                        h = getattr(sz, "height", None)
+                # fallback to app size
+                if h is None and hasattr(self, "size"):
+                    asz = getattr(self, "size")
+                    if isinstance(asz, tuple) and len(asz) >= 2:
+                        h = asz[1]
+                    else:
+                        h = getattr(asz, "height", None)
+                if h is not None and isinstance(h, int) and h > 5:
+                    # reserve a few rows for borders/headers
+                    lines_per_page = max(5, h - 6)
+            except Exception:
+                pass
+            self._render_help_page(lines_per_page=lines_per_page)
+
+    def _render_help_page(self, lines_per_page: int = 25) -> None:
+        try:
+            if not self._help_text_lines:
+                return
+            start = self._help_scroll
+            end = start + lines_per_page
+            page = "\n".join(self._help_text_lines[start:end])
+            try:
+                self.help_panel.update(page)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def on_key(self, event) -> None:
+        """Handle key events for Static help scrolling fallback."""
+        try:
+            if getattr(self, 'help_panel', None) is None:
+                return
+            if ScrollView is not None:
+                return  # ScrollView handles keys itself
+            # Only respond when help panel visible
+            if not getattr(self.help_panel, 'visible', False):
+                return
+            key = getattr(event, 'key', None) or getattr(event, 'key', '')
+            if not key:
+                return
+            # Basic navigation
+            # helper to compute current lines per page similar to _set_help_text
+            def _current_lines_per_page():
+                lines_per_page = 25
+                try:
+                    h = None
+                    if hasattr(self.help_panel, "size"):
+                        sz = getattr(self.help_panel, "size")
+                        if isinstance(sz, tuple) and len(sz) >= 2:
+                            h = sz[1]
+                        else:
+                            h = getattr(sz, "height", None)
+                    if h is None and hasattr(self, "size"):
+                        asz = getattr(self, "size")
+                        if isinstance(asz, tuple) and len(asz) >= 2:
+                            h = asz[1]
+                        else:
+                            h = getattr(asz, "height", None)
+                    if h is not None and isinstance(h, int) and h > 5:
+                        lines_per_page = max(5, h - 6)
+                except Exception:
+                    pass
+                return lines_per_page
+
+            if key.lower() in ('down', 'j'):
+                self._help_scroll = min(len(self._help_text_lines)-1, self._help_scroll + 1)
+                self._render_help_page(lines_per_page=_current_lines_per_page())
+                event.stop()
+            elif key.lower() in ('up', 'k'):
+                self._help_scroll = max(0, self._help_scroll - 1)
+                self._render_help_page(lines_per_page=_current_lines_per_page())
+                event.stop()
+            elif key.lower() in ('pageup',):
+                lpp = _current_lines_per_page()
+                self._help_scroll = max(0, self._help_scroll - lpp)
+                self._render_help_page(lines_per_page=lpp)
+                event.stop()
+            elif key.lower() in ('pagedown',):
+                lpp = _current_lines_per_page()
+                self._help_scroll = min(max(0, len(self._help_text_lines)-1), self._help_scroll + lpp)
+                self._render_help_page(lines_per_page=lpp)
+                event.stop()
+            elif key.lower() in ('home',):
+                self._help_scroll = 0
+                self._render_help_page(lines_per_page=_current_lines_per_page())
+                event.stop()
+            elif key.lower() in ('end',):
+                # move to last page start
+                lpp = _current_lines_per_page()
+                self._help_scroll = max(0, len(self._help_text_lines)-lpp)
+                self._render_help_page(lines_per_page=lpp)
+                event.stop()
+        except Exception:
+            pass
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Track when user highlights a row to prevent table updates during interaction."""
+        try:
+            self._user_interacting = True
+            self._last_interaction_time = time.time()
+        except Exception:
+            pass
+    
+    def on_data_table_row_selected(self, event) -> None:
+        """Track when user selects a row."""
+        try:
+            self._user_interacting = True
+            self._last_interaction_time = time.time()
+        except Exception:
+            pass
+    
+    def on_data_table_cell_highlighted(self, event) -> None:
+        """Track when user highlights a cell."""
+        try:
+            self._user_interacting = True
+            self._last_interaction_time = time.time()
+        except Exception:
+            pass
+    
+    def on_mouse_down(self, event) -> None:
+        """Track mouse down events on the table."""
+        try:
+            # Check if the event is on the downloads table
+            if hasattr(event, 'widget') and event.widget == self.downloads_table:
+                self._user_interacting = True
+                self._last_interaction_time = time.time()
+        except Exception:
+            pass
+    
+    def on_mouse_up(self, event) -> None:
+        """Reset interaction flag after mouse up."""
+        try:
+            if hasattr(event, 'widget') and event.widget == self.downloads_table:
+                # Small delay before allowing updates again
+                self._last_interaction_time = time.time()
+        except Exception:
+            pass
+
     def _collect_current_errors(self) -> List[tuple]:
-        """Collect a list of current error statuses from downloads.
-        Returns list of tuples: (id, name, status_text, hint_text)
-        Only includes entries where status starts with 'Error:'.
-        """
         out: List[tuple] = []
         try:
             for d in getattr(self, 'downloads', []) or []:
@@ -2676,10 +3477,125 @@ class TermoLoad(App):
         except Exception:
             logging.exception("[TermoLoad] _remove_selected_from_list failed")
 
+    def _on_delete_confirmed(self, confirmed: bool) -> None:
+        """Callback when user responds to delete confirmation modal."""
+        if confirmed:
+            # User confirmed deletion, proceed with delete
+            asyncio.create_task(self._delete_selected_file_async(delete_partials=True, remove_from_list=True))
+            self.notify("Deleting files and removing from list...", severity="information")
+        else:
+            # User cancelled
+            self.notify("Delete cancelled.", severity="information")
+
+    def _handle_torrent_file_selection(self, result: Optional[dict], download_id: int, custom_path: str, url: str, name: str, d_type: str) -> None:
+        """Handle the result from TorrentFileSelectModal and create download entry."""
+        try:
+            if not result:
+                # User cancelled - clean up temp handle
+                temp_key = f"temp_{download_id}"
+                handle = self.downloader.torrent_handles.pop(temp_key, None)
+                if handle and self.downloader.torrent_session:
+                    try:
+                        self.downloader.torrent_session.remove_torrent(handle)
+                    except:
+                        pass
+                
+                self.notify("Torrent download cancelled", severity="information")
+                return
+            
+            selected_files = result.get("selected_files", [])
+            torrent_info = result.get("torrent_info", {})
+            
+            logging.info(f"[TermoLoad] User selected {len(selected_files)} files from torrent")
+            
+            # Update name from torrent info
+            torrent_name = torrent_info.get("name", name)
+            
+            # NOW create the download entry
+            new_entry = {
+                "id": download_id,
+                "type": d_type,
+                "name": torrent_name,
+                "url": url,
+                "path": custom_path,
+                "progress": 0.0,
+                "speed": "0 B/s",
+                "status": "Queued",
+                "eta": "--",
+                "peers": 0,
+                "seeds": 0
+            }
+            
+            # Add to table
+            try:
+                row_key = self.downloads_table.add_row(
+                    str(new_entry["id"]),
+                    new_entry["type"],
+                    new_entry["name"],
+                    "0.00%",
+                    "0 B/s",
+                    "Waiting...",
+                    new_entry["status"],
+                    "--"
+                )
+                new_entry["row_key"] = row_key
+            except Exception:
+                logging.exception("[TermoLoad] Failed to add torrent row to table")
+                return
+            
+            # Add to downloads list
+            self.downloads.append(new_entry)
+            
+            # Save state
+            try:
+                self.save_downloads_state()
+            except Exception:
+                pass
+            
+            # Show UI elements
+            try:
+                self.downloads_table.visible = True
+                self.downloads_table.display = True
+                self.downloads_toolbar.visible = True
+                self.downloads_toolbar.display = True
+                self.status_info.visible = True
+                self.status_info.display = True
+                self.no_downloads.visible = False
+                self.no_downloads.display = False
+                self.settings_panel.visible = False
+                self.settings_panel.display = False
+                self.logs_panel.visible = False
+                self.logs_panel.display = False
+                self.help_panel.visible = False
+                self.help_panel.display = False
+            except Exception:
+                pass
+            
+            # Scroll to top
+            try:
+                self.call_later(lambda: asyncio.create_task(self._deferred_scroll_to_top()))
+            except Exception:
+                try:
+                    self.scroll_downloads_to_top()
+                except Exception:
+                    pass
+            
+            # Create the download task with file selection
+            task = asyncio.create_task(
+                self.downloader.download_torrent(url, download_id, custom_path, selected_files)
+            )
+            self.download_tasks[download_id] = task
+            
+            self.notify(f"Starting download: {len(selected_files)} of {torrent_info.get('num_files', 0)} files", severity="information")
+            logging.info(f"[TermoLoad] Created asyncio task for selective torrent download {download_id}")
+            
+        except Exception:
+            logging.exception("[TermoLoad] _handle_torrent_file_selection failed")
+            
+        except Exception:
+            logging.exception("[TermoLoad] _handle_torrent_file_selection failed")
+
     async def _delete_selected_file_async(self, delete_partials: bool = True, remove_from_list: bool = False) -> None:
-        """Safely delete the selected download's file even if it's downloading.
-        Cancels any running task, waits a tick, deletes files, and optionally removes the row.
-        """
         d = self._get_selected_download()
         if not d:
             return
@@ -2817,25 +3733,48 @@ class TermoLoad(App):
             self._resume_download(int(d.get("id")))
 
     def action_add_download(self) -> None:
-        self.push_screen(AddDownloadModal())
+        """Add a new download - opens modal dialog."""
+        try:
+            self.push_screen(AddDownloadModal())
+        except Exception as e:
+            logging.exception(f"[TermoLoad] Error opening add download modal: {e}")
+            self.notify("Error opening download dialog", severity="error")
            
     
     async def on_screen_dismissed(self, event):
-        logging.info(f"[TermoLoad] on_screen_dismissed CALLED: screen={type(event.screen)} result={event.result}")
-        if isinstance(event.screen, AddDownloadModal):
-            logging.info("[TermoLoad] on_screen_dismissed: AddDownloadModal detected")
-            result = event.result
-            logging.info(f"[TermoLoad] on_screen_dismissed: result={result}")
-            if result and isinstance(result, dict):
-                url = result["url"]
-                custom_path = result["path"]
+        """Handle modal screen dismissal with proper error handling."""
+        try:
+            logging.info(f"[TermoLoad] on_screen_dismissed CALLED: screen={type(event.screen)} result={event.result}")
+            
+            if isinstance(event.screen, AddDownloadModal):
+                logging.info("[TermoLoad] on_screen_dismissed: AddDownloadModal detected")
+                result = event.result
+                logging.info(f"[TermoLoad] on_screen_dismissed: result={result}")
+                
+                if not result or not isinstance(result, dict):
+                    logging.info("[TermoLoad] No result or invalid result type")
+                    return
+                
+                url = result.get("url", "").strip()
+                custom_path = result.get("path", "").strip()
+                
+                if not url:
+                    self.notify("Invalid URL provided", severity="warning")
+                    return
+                    
                 logging.info(f"[TermoLoad] on_screen_dismissed: url={url}, custom_path={custom_path}")
+                
+                # Use atomic counter for ID generation
                 new_id = len(self.downloads) + 1
-                is_torrent =(
+                
+                is_torrent = (
                     url.startswith("magnet:") or
-                    url.endswith(".torrent") or
+                    url.lower().endswith(".torrent") or
                     (os.path.isfile(url) and url.lower().endswith(".torrent"))
                 )
+                
+                logging.info(f"[TermoLoad] is_torrent={is_torrent} for url={url}")
+                
                 if is_torrent:
                     d_type = "Torrent"
                     if os.path.isfile(url):
@@ -2865,6 +3804,50 @@ class TermoLoad(App):
                     else:
                         name = url.split("/")[-1] or f"download_{new_id}"
 
+                # For torrents, handle file selection FIRST before creating entry
+                if d_type == "Torrent":
+                    # Check if libtorrent is available
+                    if not LIBTORRENT_AVAILABLE:
+                        self.notify(
+                            "Torrent downloads unavailable. Install Visual C++ Redistributables.",
+                            severity="error",
+                            timeout=5
+                        )
+                        logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
+                        return
+                    
+                    logging.info(f"[TermoLoad] Fetching torrent info for file selection...")
+                    self.notify("Fetching torrent information...", severity="information")
+                    
+                    try:
+                        # Fetch torrent info first
+                        torrent_info = await self.downloader.get_torrent_info(url, new_id)
+                        
+                        logging.info(f"[TermoLoad] Torrent info received: {torrent_info is not None}")
+                        if torrent_info:
+                            logging.info(f"[TermoLoad] Torrent has {len(torrent_info.get('files', []))} files")
+                        
+                        if not torrent_info:
+                            self.notify("Failed to fetch torrent information", severity="error")
+                            logging.error("[TermoLoad] get_torrent_info returned None")
+                            return
+                        
+                        # Show file selection modal
+                        logging.info(f"[TermoLoad] About to show TorrentFileSelectModal...")
+                        def handle_file_selection(result):
+                            logging.info(f"[TermoLoad] File selection callback triggered with result: {result is not None}")
+                            self._handle_torrent_file_selection(result, new_id, custom_path, url, name, d_type)
+                        
+                        self.push_screen(TorrentFileSelectModal(torrent_info), handle_file_selection)
+                        logging.info(f"[TermoLoad] TorrentFileSelectModal pushed to screen")
+                        
+                    except Exception as ex:
+                        logging.exception(f"[TermoLoad] Failed to fetch torrent info: {ex}")
+                        self.notify("Error fetching torrent files", severity="error")
+                    
+                    return  # Don't proceed with normal download flow
+                
+                # For non-torrent downloads, create entry normally
                 new_entry = {
                     "id": new_id,
                     "type": d_type,
@@ -2939,29 +3922,8 @@ class TermoLoad(App):
                 except Exception:
                     pass
                 
-                # Start the download task based on type
-                if d_type == "Torrent":
-                    # Check if libtorrent is available
-                    if not LIBTORRENT_AVAILABLE:
-                        self.notify(
-                            "Torrent downloads unavailable. Install Visual C++ Redistributables.",
-                            severity="error",
-                            timeout=5
-                        )
-                        logging.error("[TermoLoad] Cannot add torrent - libtorrent not available")
-                        return
-                    
-                    logging.info(f"[TermoLoad] Starting torrent download {new_id} -> {url} -> {custom_path}")
-                    try:
-                        task = asyncio.create_task(
-                            self.downloader.download_torrent(url, new_id, custom_path)
-                        )
-                        self.download_tasks[new_id] = task
-                        logging.info(f"[TermoLoad] Created asyncio task for torrent download {new_id}")
-                    except Exception as ex:
-                        logging.exception(f"[TermoLoad] Failed to create torrent task: {ex}")
-                        
-                elif d_type == "URL":
+                # Start the download task based on type (non-torrents only)
+                if d_type == "URL":
                     logging.info(f"[TermoLoad] Queuing download {new_id} -> {url} -> {custom_path}")
                     try:
                         task = asyncio.create_task(
@@ -2985,6 +3947,10 @@ class TermoLoad(App):
                         logging.info(f"[TermoLoad] Created asyncio task for yt-dlp download {new_id}")
                     except Exception as ex:
                             logging.exception(f"[TermoLoad] Failed to create yt-dlp task: {ex}")
+        
+        except Exception as e:
+            logging.exception(f"[TermoLoad] Error in on_screen_dismissed: {e}")
+            self.notify("Error processing download request", severity="error")
 
     
     def scroll_downloads_to_top(self) -> None:
@@ -3195,13 +4161,17 @@ class TermoLoad(App):
             logging.exception("[TermoLoad] process_modal_result: unexpected error")
 
     async def on_unmount(self) -> None:
+        """Clean up resources when app is closing."""
         try:
+            # Clean up tkinter resources
+            TkinterDialogHelper.cleanup()
+            
             for d in self.downloads:
                 if d.get("status") in ("Downloading", "Queued"):
                     d["status"] = "Paused"
             self.save_downloads_state(force=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.exception(f"[TermoLoad] Error during unmount cleanup: {e}")
 
         # Cancel all download tasks
         for task in self.download_tasks.values():
@@ -3356,5 +4326,10 @@ class TermoLoad(App):
 
         
 if __name__ == "__main__":
+    # Show loading screen first
+    loading = LoadingScreen()
+    loading.run()
+    
+    # Then launch the main app
     app = TermoLoad()
     app.run()

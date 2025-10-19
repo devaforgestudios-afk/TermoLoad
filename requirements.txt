@@ -1,0 +1,6 @@
+textual
+aiohttp
+aiofiles
+Pillow
+pystray
+pyinstaller
