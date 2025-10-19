@@ -1,20 +1,42 @@
 # TermoLoad - Download Manager
 
-A powerful, terminal-based download manager built with Python and Textual. TermoLoad provides a beautiful TUI (Text User Interface) for managing multiple downloads with features like concurrent downloads, torrent support, speed limiting, download history, and automatic shutdown.
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/devaforgestudios-afk/TermoLoad/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/devaforgestudios-afk/TermoLoad/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+A powerful, terminal-based download manager with full BitTorrent support and a beautiful TUI interface. TermoLoad provides a modern solution for managing HTTP/HTTPS/FTP downloads and torrents with concurrent downloads, speed tracking, and comprehensive error handling.
+
+## 📦 Download Executable (v1.0)
+
+**Ready to use - No Python installation required!**
+
+👉 **[Download TermoLoad v1.0 for Windows](https://github.com/devaforgestudios-afk/TermoLoad/releases/latest)**
+
+- Size: ~26 MB (compressed)
+- Platform: Windows 10/11 (64-bit)
+- Startup: 2-5 seconds
+- Includes: Full torrent support + system tray integration
 
 ## 🚀 Quick Start
 
+### Option 1: Use Pre-built Executable (Recommended)
+```batch
+# Download from releases page
+# Extract TermoLoad-v1.0-Windows.zip
+# Run TermoLoad.exe
+# Allow Windows Firewall when prompted (required for torrents)
+```
+
+### Option 2: Run from Source
 ```bash
 # Install dependencies
-pip install textual aiohttp aiofiles Pillow pystray
-pip install libtorrent  # Optional: For torrent support
-pip install yt-dlp      # Optional: For video downloads
+pip install -r requirements.txt
 
 # Run
 python app.py
 ```
 
-**Key Features**: HTTP/HTTPS downloads • BitTorrent (magnets + .torrent) • YouTube/Video (yt-dlp) • Download History • Statistics • Resume Support • Smart Delete • Sound Notifications • System Tray • Open Folder
+**Key Features**: HTTP/HTTPS/FTP downloads • BitTorrent (magnets + .torrent) • Multi-file selection • Download History • Statistics • Resume Support • System Tray • Windows Firewall Integration
 
 ## ✨ Features
 
