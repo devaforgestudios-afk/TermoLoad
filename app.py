@@ -1,6 +1,20 @@
+# Core imports - keep these at top for fast startup
+import os
+import sys
+import asyncio
+import logging
+import json
+import time
+import threading
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+from collections import deque
+
+# Textual imports - needed for UI
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Static, Button, Input, Label, Checkbox
 from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
 
 # ScrollView location changes between textual versions; try both locations
 try:
@@ -10,29 +24,67 @@ except Exception:
         from textual.containers import ScrollView  # type: ignore
     except Exception:
         ScrollView = None
-from textual.screen import ModalScreen
+
+# Lazy imports - delay these until actually needed
+# Will be imported when first used
+_PIL_Image = None
+_PIL_ImageDraw = None
+_aiohttp = None
+_aiofiles = None
+_pystray = None
+_tkinter = None
+_tkinter_filedialog = None
+
+def get_pil_modules():
+    """Lazy load PIL modules."""
+    global _PIL_Image, _PIL_ImageDraw
+    if _PIL_Image is None:
+        from PIL import Image, ImageDraw
+        _PIL_Image = Image
+        _PIL_ImageDraw = ImageDraw
+    return _PIL_Image, _PIL_ImageDraw
+
+def get_aiohttp():
+    """Lazy load aiohttp."""
+    global _aiohttp
+    if _aiohttp is None:
+        import aiohttp
+        _aiohttp = aiohttp
+    return _aiohttp
+
+def get_aiofiles():
+    """Lazy load aiofiles."""
+    global _aiofiles
+    if _aiofiles is None:
+        import aiofiles
+        _aiofiles = aiofiles
+    return _aiofiles
+
+def get_pystray():
+    """Lazy load pystray."""
+    global _pystray
+    if _pystray is None:
+        import pystray
+        _pystray = pystray
+    return _pystray
+
+def get_tkinter():
+    """Lazy load tkinter."""
+    global _tkinter, _tkinter_filedialog
+    if _tkinter is None:
+        import tkinter as tk
+        import tkinter.filedialog
+        _tkinter = tk
+        _tkinter_filedialog = tkinter.filedialog
+    return _tkinter, _tkinter_filedialog
+
+# Standard library imports
 import random
-import asyncio
-import aiohttp
-import threading
-from PIL import Image, ImageDraw
-import aiofiles
-import os
-from pathlib import Path
-from urllib.parse import urlparse
-import json
-import time
-import tkinter as tk
-import tkinter.filedialog
-import pystray
 import shutil
-import sys
 import subprocess
-import logging
 import ctypes
 import winsound
-from collections import deque
-from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 import queue
 import concurrent.futures
 
@@ -45,6 +97,9 @@ class TkinterDialogHelper:
         """Run a tkinter dialog in a separate thread to prevent blocking."""
         def wrapper():
             try:
+                # Lazy load tkinter
+                tk, tk_filedialog = get_tkinter()
+                
                 # Create a fresh root for each dialog to prevent state issues
                 root = tk.Tk()
                 root.withdraw()
@@ -52,7 +107,7 @@ class TkinterDialogHelper:
                 root.update()
                 
                 # Run the dialog
-                result = dialog_func(root)
+                result = dialog_func(root, tk_filedialog)
                 
                 # Clean up
                 try:
@@ -80,8 +135,8 @@ class TkinterDialogHelper:
     @classmethod
     def ask_open_filename(cls, title="Select File", filetypes=None):
         """Thread-safe file open dialog that won't hang in EXE."""
-        def dialog_func(root):
-            return tkinter.filedialog.askopenfilename(
+        def dialog_func(root, tk_filedialog):
+            return tk_filedialog.askopenfilename(
                 parent=root,
                 title=title,
                 filetypes=filetypes or [("All Files", "*.*")]
@@ -93,8 +148,8 @@ class TkinterDialogHelper:
     @classmethod
     def ask_directory(cls, title="Select Folder"):
         """Thread-safe directory selection dialog that won't hang in EXE."""
-        def dialog_func(root):
-            return tkinter.filedialog.askdirectory(
+        def dialog_func(root, tk_filedialog):
+            return tk_filedialog.askdirectory(
                 parent=root,
                 title=title
             )
@@ -105,8 +160,8 @@ class TkinterDialogHelper:
     @classmethod
     def ask_save_filename(cls, title="Save As", filetypes=None, defaultextension=""):
         """Thread-safe save file dialog that won't hang in EXE."""
-        def dialog_func(root):
-            return tkinter.filedialog.asksaveasfilename(
+        def dialog_func(root, tk_filedialog):
+            return tk_filedialog.asksaveasfilename(
                 parent=root,
                 title=title,
                 filetypes=filetypes or [("All Files", "*.*")],
@@ -251,47 +306,137 @@ class RealDownloader:
         self.torrent_handles = {}
 
     def start_torrent_session(self):
-        """Initialize libtorrent session with optimal settings"""
+        """Initialize libtorrent session with optimal settings and firewall handling"""
         if self.torrent_session is None and LIBTORRENT_AVAILABLE:
             try:
                 import libtorrent as lt
                 
+                # Request firewall permission for Windows
+                try:
+                    self._request_firewall_permission()
+                except Exception as fw_error:
+                    logging.warning(f"[TermoLoad] Firewall permission request failed (non-critical): {fw_error}")
+                
                 # Create session with minimal but working settings
-                self.torrent_session = lt.session({
+                # Using safer settings to avoid crashes
+                settings = {
                     'listen_interfaces': '0.0.0.0:6881,[::]:6881',
                     'enable_outgoing_utp': True,
                     'enable_incoming_utp': True,
                     'enable_outgoing_tcp': True,
                     'enable_incoming_tcp': True,
-                })
+                    'alert_mask': lt.alert.category_t.error_notification | 
+                                  lt.alert.category_t.status_notification |
+                                  lt.alert.category_t.storage_notification,
+                }
                 
-                # Apply additional settings separately
-                sett = self.torrent_session.get_settings()
-                sett['user_agent'] = 'libtorrent/2.0'
-                sett['announce_to_all_tiers'] = True
-                sett['announce_to_all_trackers'] = True
-                sett['auto_manage_interval'] = 5
-                self.torrent_session.apply_settings(sett)
+                self.torrent_session = lt.session(settings)
                 
-                # Add DHT bootstrap nodes
-                self.torrent_session.add_dht_router("router.bittorrent.com", 6881)
-                self.torrent_session.add_dht_router("router.utorrent.com", 6881)
-                self.torrent_session.add_dht_router("dht.transmissionbt.com", 6881)
+                # Apply additional settings separately with error handling
+                try:
+                    sett = self.torrent_session.get_settings()
+                    sett['user_agent'] = 'libtorrent/2.0'
+                    sett['announce_to_all_tiers'] = True
+                    sett['announce_to_all_trackers'] = True
+                    sett['auto_manage_interval'] = 5
+                    sett['connections_limit'] = 200
+                    sett['download_rate_limit'] = 0
+                    sett['upload_rate_limit'] = 0
+                    self.torrent_session.apply_settings(sett)
+                except Exception as settings_error:
+                    logging.warning(f"[TermoLoad] Could not apply all settings: {settings_error}")
+                
+                # Add DHT bootstrap nodes with error handling
+                try:
+                    self.torrent_session.add_dht_router("router.bittorrent.com", 6881)
+                    self.torrent_session.add_dht_router("router.utorrent.com", 6881)
+                    self.torrent_session.add_dht_router("dht.transmissionbt.com", 6881)
+                except Exception as dht_error:
+                    logging.warning(f"[TermoLoad] DHT router setup failed (non-critical): {dht_error}")
                 
                 logging.info("[TermoLoad] Torrent session started successfully")
             except Exception as e:
                 logging.exception(f"[TermoLoad] Failed to start torrent session: {e}")
+                self.torrent_session = None
+    
+    def _request_firewall_permission(self):
+        """Request Windows Firewall permission for torrent connections"""
+        try:
+            import sys
+            import subprocess
+            import os
+            
+            # Only on Windows
+            if sys.platform != 'win32':
+                return
+            
+            # Get the executable path
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                exe_path = sys.executable
+            else:
+                # Running as script
+                exe_path = sys.executable
+            
+            # Check if running with admin rights
+            try:
+                is_admin = os.getuid() == 0
+            except AttributeError:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            
+            if is_admin:
+                # Add firewall rule using netsh
+                app_name = "TermoLoad"
+                try:
+                    # Remove existing rule if any
+                    subprocess.run(
+                        ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={app_name}'],
+                        capture_output=True,
+                        timeout=5
+                    )
+                except:
+                    pass
+                
+                # Add new rule
+                subprocess.run(
+                    ['netsh', 'advfirewall', 'firewall', 'add', 'rule', 
+                     f'name={app_name}', 
+                     'dir=in', 
+                     'action=allow', 
+                     f'program={exe_path}',
+                     'enable=yes'],
+                    capture_output=True,
+                    timeout=5,
+                    check=False
+                )
+                logging.info(f"[TermoLoad] Firewall rule added for {exe_path}")
+            else:
+                # Show notification to user to allow firewall access
+                logging.info("[TermoLoad] Please allow firewall access when prompted for torrent downloads")
+                # Windows will automatically prompt when port binding occurs
+                
+        except Exception as e:
+            logging.warning(f"[TermoLoad] Firewall setup warning: {e}")
     
     async def get_torrent_info(self, url: str, download_id: int) -> Optional[dict]:
         """Fetch torrent metadata without starting download."""
+        temp_file = None
         try:
+            # Lazy load aiofiles when needed
+            aiofiles = get_aiofiles()
+            
             if not LIBTORRENT_AVAILABLE:
+                logging.warning("[TermoLoad] Libtorrent not available for torrent info")
                 return None
             
             if self.torrent_session is None:
+                logging.info("[TermoLoad] Starting torrent session for info fetch...")
                 self.start_torrent_session()
+                await asyncio.sleep(0.5)  # Give session time to initialize
             
             if self.torrent_session is None:
+                logging.error("[TermoLoad] Failed to create torrent session")
                 return None
             
             import libtorrent as lt
@@ -300,91 +445,166 @@ class RealDownloader:
             params = lt.add_torrent_params()
             params.save_path = str(Path("temp_info"))
             
-            # Parse based on type
-            if url.startswith("magnet:"):
-                params = lt.parse_magnet_uri(url)
-                params.save_path = str(Path("temp_info"))
-                params.flags |= lt.torrent_flags.upload_mode  # Don't download, just get metadata
-            elif os.path.isfile(url):
-                info = lt.torrent_info(url)
-                params.ti = info
-            elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
-                await self.start_session()
-                async with self.session.get(url) as response:
-                    if response.status == 200:
-                        torrent_data = await response.read()
-                        temp_file = Path("temp_info") / f"temp_{download_id}.torrent"
-                        temp_file.parent.mkdir(parents=True, exist_ok=True)
-                        async with aiofiles.open(temp_file, "wb") as f:
-                            await f.write(torrent_data)
-                        info = lt.torrent_info(str(temp_file))
+            # Parse based on type with comprehensive error handling
+            try:
+                if url.startswith("magnet:"):
+                    logging.info("[TermoLoad] Parsing magnet link for info...")
+                    params = lt.parse_magnet_uri(url)
+                    params.save_path = str(Path("temp_info"))
+                    params.flags |= lt.torrent_flags.upload_mode  # Don't download, just get metadata
+                    
+                elif os.path.isfile(url):
+                    logging.info(f"[TermoLoad] Reading torrent file for info: {url}")
+                    try:
+                        info = lt.torrent_info(url)
                         params.ti = info
-                        try:
-                            temp_file.unlink()
-                        except:
-                            pass
-                    else:
+                    except Exception as file_error:
+                        logging.error(f"[TermoLoad] Failed to read torrent file: {file_error}")
                         return None
-            else:
-                return None
-            
-            # Add torrent temporarily to get info
-            handle = self.torrent_session.add_torrent(params)
-            
-            # Wait for metadata if magnet
-            if url.startswith("magnet:"):
-                for i in range(60):
-                    if not handle.is_valid():
-                        break
-                    status = handle.status()
-                    if status.has_metadata:
-                        break
-                    await asyncio.sleep(1)
-                
-                if not handle.status().has_metadata:
-                    self.torrent_session.remove_torrent(handle)
+                    
+                elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
+                    logging.info("[TermoLoad] Downloading torrent file for info...")
+                    await self.start_session()
+                    
+                    try:
+                        async with self.session.get(url, timeout=30) as response:
+                            if response.status == 200:
+                                torrent_data = await response.read()
+                                temp_file = Path("temp_info") / f"temp_{download_id}.torrent"
+                                temp_file.parent.mkdir(parents=True, exist_ok=True)
+                                
+                                async with aiofiles.open(temp_file, "wb") as f:
+                                    await f.write(torrent_data)
+                                
+                                info = lt.torrent_info(str(temp_file))
+                                params.ti = info
+                            else:
+                                logging.error(f"[TermoLoad] HTTP error downloading torrent: {response.status}")
+                                return None
+                    except asyncio.TimeoutError:
+                        logging.error("[TermoLoad] Timeout downloading torrent file")
+                        return None
+                    except Exception as download_error:
+                        logging.exception(f"[TermoLoad] Error downloading torrent: {download_error}")
+                        return None
+                else:
+                    logging.error(f"[TermoLoad] Invalid torrent source: {url}")
                     return None
             
-            # Extract file information
-            status = handle.status()
-            torrent_info_obj = handle.torrent_file()
+            except Exception as parse_error:
+                logging.exception(f"[TermoLoad] Failed to parse torrent source: {parse_error}")
+                return None
             
-            files_info = []
-            if torrent_info_obj:
-                for i in range(torrent_info_obj.num_files()):
-                    file_entry = torrent_info_obj.files().at(i)
-                    files_info.append({
-                        "index": i,
-                        "path": file_entry.path,
-                        "size": file_entry.size
-                    })
+            # Add torrent temporarily to get info with error handling
+            try:
+                handle = self.torrent_session.add_torrent(params)
+                
+                if not handle.is_valid():
+                    logging.error("[TermoLoad] Invalid handle returned")
+                    return None
+                    
+            except Exception as add_error:
+                logging.exception(f"[TermoLoad] Failed to add torrent for info: {add_error}")
+                return None
             
-            result = {
-                "name": status.name if status.has_metadata else "Unknown",
-                "total_size": status.total_wanted,
-                "num_files": len(files_info),
-                "files": files_info,
-                "handle": handle  # Keep handle for later use
-            }
+            # Wait for metadata if magnet with timeout
+            if url.startswith("magnet:"):
+                logging.info("[TermoLoad] Waiting for magnet metadata...")
+                metadata_received = False
+                
+                for i in range(60):
+                    try:
+                        if not handle.is_valid():
+                            logging.warning("[TermoLoad] Handle became invalid")
+                            break
+                            
+                        status = handle.status()
+                        if status.has_metadata:
+                            logging.info(f"[TermoLoad] Metadata received after {i+1}s")
+                            metadata_received = True
+                            break
+                            
+                        await asyncio.sleep(1)
+                    except Exception as status_error:
+                        logging.warning(f"[TermoLoad] Error checking metadata: {status_error}")
+                        await asyncio.sleep(1)
+                        continue
+                
+                if not metadata_received:
+                    logging.error("[TermoLoad] Metadata timeout")
+                    try:
+                        self.torrent_session.remove_torrent(handle)
+                    except:
+                        pass
+                    return None
             
-            # Don't remove handle yet - we'll use it for actual download
-            # Store temporarily
-            self.torrent_handles[f"temp_{download_id}"] = handle
-            
-            return result
-            
+            # Extract file information with error handling
+            try:
+                status = handle.status()
+                torrent_info_obj = handle.torrent_file()
+                
+                files_info = []
+                if torrent_info_obj:
+                    for i in range(torrent_info_obj.num_files()):
+                        try:
+                            file_entry = torrent_info_obj.files().at(i)
+                            files_info.append({
+                                "index": i,
+                                "path": file_entry.path,
+                                "size": file_entry.size
+                            })
+                        except Exception as file_error:
+                            logging.warning(f"[TermoLoad] Error reading file {i}: {file_error}")
+                            continue
+                
+                result = {
+                    "name": status.name if status.has_metadata else "Unknown",
+                    "total_size": status.total_wanted,
+                    "num_files": len(files_info),
+                    "files": files_info,
+                    "handle": handle  # Keep handle for later use
+                }
+                
+                # Don't remove handle yet - we'll use it for actual download
+                # Store temporarily
+                self.torrent_handles[f"temp_{download_id}"] = handle
+                
+                logging.info(f"[TermoLoad] Torrent info retrieved: {result['name']}, {len(files_info)} files")
+                return result
+                
+            except Exception as extract_error:
+                logging.exception(f"[TermoLoad] Failed to extract torrent info: {extract_error}")
+                try:
+                    self.torrent_session.remove_torrent(handle)
+                except:
+                    pass
+                return None
+                
         except Exception as e:
             logging.exception(f"[TermoLoad] Failed to get torrent info: {e}")
             return None
+        
+        finally:
+            # Cleanup temporary file
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                    logging.info("[TermoLoad] Cleaned up temp torrent file")
+                except Exception as cleanup_error:
+                    logging.warning(f"[TermoLoad] Could not cleanup temp file: {cleanup_error}")
 
     async def download_torrent(self, url: str, download_id: int, custom_path: str, selected_files: Optional[List[int]] = None) -> bool:
         """Download torrent from magnet link, .torrent file, or URL with optional file selection."""
+        torrent_data_file = None
         try:
+            # Lazy load aiofiles when needed
+            aiofiles = get_aiofiles()
+            
             if not LIBTORRENT_AVAILABLE:
                 self.update_download_progress(
                     download_id, 0.0, 0, 0, "Error: Libtorrent not available"
                 )
-                logging.error("[TermoLoad] Libtorrent unavailable")
+                logging.error("[RealDownloader] Libtorrent unavailable")
                 return False
             
             # Check if we have a temporary handle from info fetch
@@ -392,80 +612,170 @@ class RealDownloader:
             handle = self.torrent_handles.pop(temp_key, None)
             
             if handle is None:
-                # Initialize session if needed
+                # Initialize session if needed with retries
                 if self.torrent_session is None:
+                    logging.info("[RealDownloader] Starting torrent session...")
+                    self.update_download_progress(download_id, 0.0, 0, 0, "Initializing...")
+                    await asyncio.sleep(0.2)  # Give UI time to update
+                    
+                    # Try to start session
                     self.start_torrent_session()
-                
-                if self.torrent_session is None:
-                    self.update_download_progress(
-                        download_id, 0.0, 0, 0, "Error: Failed to start torrent session"
-                    )
-                    return False
+                    
+                    # Wait and verify session started
+                    for retry in range(5):
+                        await asyncio.sleep(0.5)
+                        if self.torrent_session is not None:
+                            break
+                        logging.warning(f"[RealDownloader] Session not ready, retry {retry+1}/5")
+                    
+                    if self.torrent_session is None:
+                        self.update_download_progress(
+                            download_id, 0.0, 0, 0, "Error: Session failed"
+                        )
+                        logging.error("[RealDownloader] Torrent session creation failed after retries")
+                        return False
                 
                 save_path = Path(custom_path or "downloads")
                 save_path.mkdir(parents=True, exist_ok=True)
                 
-                # Prepare torrent parameters
+                # Prepare torrent parameters with error handling
                 import libtorrent as lt
                 params = lt.add_torrent_params()
                 params.save_path = str(save_path)
                 
-                # Add torrent based on type
-                if url.startswith("magnet:"):
-                    logging.info(f"[TermoLoad] Adding magnet link")
-                    params = lt.parse_magnet_uri(url)
-                    params.save_path = str(save_path)
-                elif os.path.isfile(url):
-                    logging.info(f"[TermoLoad] Adding torrent file: {url}")
-                    info = lt.torrent_info(url)
-                    params.ti = info
-                elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
-                    logging.info(f"[TermoLoad] Downloading .torrent from URL")
-                    await self.start_session()
-                    async with self.session.get(url) as response:
-                        if response.status == 200:
-                            torrent_data = await response.read()
-                            temp_file = save_path / f"temp_{download_id}.torrent"
-                            async with aiofiles.open(temp_file, "wb") as f:
-                                await f.write(torrent_data)
-                            info = lt.torrent_info(str(temp_file))
+                # Add torrent based on type with comprehensive error handling
+                try:
+                    if url.startswith("magnet:"):
+                        logging.info(f"[TermoLoad] Adding magnet link")
+                        self.update_download_progress(download_id, 0.0, 0, 0, "Parsing magnet...")
+                        params = lt.parse_magnet_uri(url)
+                        params.save_path = str(save_path)
+                        
+                    elif os.path.isfile(url):
+                        logging.info(f"[TermoLoad] Adding torrent file: {url}")
+                        self.update_download_progress(download_id, 0.0, 0, 0, "Reading file...")
+                        
+                        # Read torrent file with better error handling
+                        try:
+                            info = lt.torrent_info(url)
                             params.ti = info
-                            try:
-                                temp_file.unlink()
-                            except:
-                                pass
-                        else:
+                        except Exception as file_error:
+                            logging.error(f"[TermoLoad] Failed to read torrent file: {file_error}")
                             self.update_download_progress(
-                                download_id, 0.0, 0, 0, f"Error: HTTP {response.status}"
+                                download_id, 0.0, 0, 0, f"Error: Invalid torrent file"
                             )
                             return False
-                else:
+                        
+                    elif url.startswith(("http://", "https://")) and url.endswith(".torrent"):
+                        logging.info(f"[TermoLoad] Downloading .torrent from URL")
+                        self.update_download_progress(download_id, 0.0, 0, 0, "Downloading torrent...")
+                        
+                        await self.start_session()
+                        
+                        try:
+                            async with self.session.get(url, timeout=30) as response:
+                                if response.status == 200:
+                                    torrent_data = await response.read()
+                                    torrent_data_file = save_path / f"temp_{download_id}.torrent"
+                                    
+                                    async with aiofiles.open(torrent_data_file, "wb") as f:
+                                        await f.write(torrent_data)
+                                    
+                                    info = lt.torrent_info(str(torrent_data_file))
+                                    params.ti = info
+                                else:
+                                    self.update_download_progress(
+                                        download_id, 0.0, 0, 0, f"Error: HTTP {response.status}"
+                                    )
+                                    logging.error(f"[TermoLoad] Failed to download torrent: HTTP {response.status}")
+                                    return False
+                        except asyncio.TimeoutError:
+                            self.update_download_progress(
+                                download_id, 0.0, 0, 0, "Error: Download timeout"
+                            )
+                            logging.error("[TermoLoad] Torrent download timeout")
+                            return False
+                        except Exception as download_error:
+                            self.update_download_progress(
+                                download_id, 0.0, 0, 0, f"Error: {str(download_error)[:30]}"
+                            )
+                            logging.exception(f"[TermoLoad] Torrent download failed: {download_error}")
+                            return False
+                    else:
+                        self.update_download_progress(
+                            download_id, 0.0, 0, 0, "Error: Invalid source"
+                        )
+                        logging.error(f"[TermoLoad] Invalid torrent source: {url}")
+                        return False
+                    
+                except Exception as parse_error:
+                    logging.exception(f"[RealDownloader] Failed to parse torrent: {parse_error}")
                     self.update_download_progress(
-                        download_id, 0.0, 0, 0, "Error: Invalid torrent source"
+                        download_id, 0.0, 0, 0, f"Error: Parse failed"
                     )
                     return False
                 
-                # Add torrent to session
-                handle = self.torrent_session.add_torrent(params)
+                # Add torrent to session with comprehensive error handling
+                try:
+                    logging.info(f"[RealDownloader] Adding torrent to session...")
+                    self.update_download_progress(download_id, 0.0, 0, 0, "Adding to session...")
+                    
+                    # Verify session is still valid
+                    if self.torrent_session is None:
+                        raise RuntimeError("Torrent session became None")
+                    
+                    handle = self.torrent_session.add_torrent(params)
+                    
+                    # Verify handle is valid
+                    if not handle.is_valid():
+                        raise RuntimeError("Invalid torrent handle returned")
+                    
+                    logging.info(f"[RealDownloader] Torrent added successfully, handle valid: {handle.is_valid()}")
+                    
+                except Exception as add_error:
+                    logging.exception(f"[RealDownloader] Failed to add torrent to session: {add_error}")
+                    self.update_download_progress(
+                        download_id, 0.0, 0, 0, f"Error: Cannot add torrent"
+                    )
+                    return False
                 
-                # Wait for metadata if magnet
+                # Wait for metadata if magnet with timeout and better error handling
                 if url.startswith("magnet:"):
                     self.update_download_progress(download_id, 0.0, 0, 0, "Fetching Metadata")
                     logging.info(f"[TermoLoad] Waiting for metadata...")
                     
+                    metadata_received = False
                     for i in range(60):
-                        if not handle.is_valid():
-                            break
-                        status = handle.status()
-                        if status.has_metadata:
-                            logging.info(f"[TermoLoad] Metadata received")
-                            break
-                        await asyncio.sleep(1)
+                        try:
+                            if not handle.is_valid():
+                                logging.error("[TermoLoad] Handle became invalid while waiting for metadata")
+                                break
+                                
+                            status = handle.status()
+                            if status.has_metadata:
+                                logging.info(f"[TermoLoad] Metadata received after {i+1} seconds")
+                                metadata_received = True
+                                break
+                                
+                            # Update progress with countdown
+                            self.update_download_progress(
+                                download_id, 0.0, 0, 0, f"Metadata {60-i}s"
+                            )
+                            await asyncio.sleep(1)
+                        except Exception as status_error:
+                            logging.warning(f"[TermoLoad] Error checking metadata status: {status_error}")
+                            await asyncio.sleep(1)
+                            continue
                     
-                    if not handle.status().has_metadata:
+                    if not metadata_received:
                         self.update_download_progress(
                             download_id, 0.0, 0, 0, "Error: Metadata timeout"
                         )
+                        logging.error("[TermoLoad] Metadata fetch timeout")
+                        try:
+                            self.torrent_session.remove_torrent(handle)
+                        except:
+                            pass
                         return False
             else:
                 # Use existing handle from get_torrent_info
@@ -660,6 +970,15 @@ class RealDownloader:
             except:
                 pass
             return False
+        
+        finally:
+            # Cleanup temporary torrent file
+            if torrent_data_file and torrent_data_file.exists():
+                try:
+                    torrent_data_file.unlink()
+                    logging.info(f"[TermoLoad] Cleaned up temporary torrent file")
+                except Exception as cleanup_error:
+                    logging.warning(f"[TermoLoad] Could not cleanup temp file: {cleanup_error}")
     
     def stop_torrent(self,download_id:int):
         try:
@@ -685,6 +1004,9 @@ class RealDownloader:
 
     async def start_session(self):
         if not self.session:
+            # Lazy load aiohttp
+            aiohttp = get_aiohttp()
+            
             try:
                 connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300)
             except Exception:
@@ -804,6 +1126,9 @@ class RealDownloader:
     
     async def download_file(self,url:str,download_id:int,filename:str = None, custom_path: str = "downloads"):
         try:
+            # Lazy load aiofiles when needed
+            aiofiles = get_aiofiles()
+            
             logging.info(f"[TermoLoad] Starting download_file id={download_id} url={url} path={custom_path}")
             await self.start_session()
 
@@ -1944,6 +2269,9 @@ class TermoLoad(App):
         yield Footer()
     
     def _create_tray_icon_image(self):
+        # Lazy load PIL modules
+        Image, ImageDraw = get_pil_modules()
+        
         width = 64
         height = 64
         image = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
@@ -2047,7 +2375,9 @@ class TermoLoad(App):
             return len(self.downloads)
 
     def _setup_tray_icon(self):
-        if pystray is None:
+        try:
+            pystray = get_pystray()
+        except Exception:
             logging.warning("[TermoLoad] pystray not installed, system tray icon disabled")
             return
         
@@ -2081,9 +2411,13 @@ class TermoLoad(App):
             logging.exception("[TermoLoad] Failed to show active count")
     
     def minimize_to_tray(self):
-        if pystray is None:
+        # Lazy load pystray
+        try:
+            pystray = get_pystray()
+        except Exception:
             logging.warning("[TermoLoad] pystray not installed, cannot minimize to tray")
             return
+        
         try:
             if not self.tray_icon:
                 self._setup_tray_icon()
@@ -2378,7 +2712,7 @@ class TermoLoad(App):
                     "type": entry.get("type", "URL"),
                     "name": entry.get("name", f"download_{len(self.downloads)+1}"),
                     "url": entry.get("url", ""),
-                    "path": entry.get("path", self.settings.get("download_folder", str(Path.cwd()/"downloads"))),
+                    "path": entry.get("path", self.settings.get("download_folder", str(Path.home()/"Downloads"))),
                     "progress": float(entry.get("progress", 0.0)),
                     "speed": entry.get("speed", "0 B/s"),
                     "status": entry.get("status", "Paused"),
@@ -2445,8 +2779,19 @@ class TermoLoad(App):
 
     def load_settings(self):
         settings_path = Path("settings.json")
+        
+        # Get Windows Downloads folder: C:\Users\{username}\Downloads
+        try:
+            windows_downloads = Path.home() / "Downloads"
+            if not windows_downloads.exists():
+                windows_downloads.mkdir(parents=True, exist_ok=True)
+            default_download_path = str(windows_downloads)
+        except Exception:
+            # Fallback to current directory/downloads if home path fails
+            default_download_path = str(Path.cwd() / "downloads")
+        
         defaults = {
-            "download_folder": str(Path.cwd() / "downloads"),
+            "download_folder": default_download_path,
             "concurrent": 3,
             "max_speed_kb": 0,
             "shutdown_on_complete": False,
@@ -2839,7 +3184,7 @@ class TermoLoad(App):
                 sound_complete_checkbox = self.query_one("#settings_sound_complete", Checkbox)
                 sound_error_checkbox = self.query_one("#settings_sound_error", Checkbox)
                 
-                self.settings["download_folder"] = folder_input.value.strip() or str(Path.cwd() / "downloads")
+                self.settings["download_folder"] = folder_input.value.strip() or str(Path.home() / "Downloads")
                 try:
                     self.settings["concurrent"] = int(concurrent_input.value.strip() or 3)
                 except Exception:
@@ -2989,39 +3334,47 @@ class TermoLoad(App):
         self.refresh()
     
     def _export_history_csv(self):
-        try:
-            import csv
-            
-            filepath = TkinterDialogHelper.ask_save_filename(
-                title="Export History as CSV",
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-            )
-            
-            if not filepath:
-                return
-            
-            # Ensure .csv extension
-            if not filepath.lower().endswith('.csv'):
-                filepath += '.csv'
+        """Export history with async dialog to prevent EXE hanging."""
+        async def do_export():
+            try:
+                import csv
                 
-            with open(filepath, "w", newline='', encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Date", "Name", "Type", "Size (Bytes)", "Status", "URL", "Error"])
-                for entry in self.history.history:
-                    writer.writerow([
-                        entry.get("date", ""),
-                        entry.get("name", ""),
-                        entry.get("type", ""),
-                        entry.get("size", 0),
-                        entry.get("status", ""),
-                        entry.get("url", ""),
-                        entry.get("error", "")
-                    ])
-            self.notify(f"History exported to {filepath}", severity="information", timeout=5)
-            logging.info(f"[TermoLoad] History exported to {filepath}")
-        except Exception:
-            logging.exception("[TermoLoad] failed to export history to CSV")
+                filepath = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: TkinterDialogHelper.ask_save_filename(
+                        title="Export History as CSV",
+                        defaultextension=".csv",
+                        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+                    )
+                )
+                
+                if not filepath:
+                    return
+                
+                # Ensure .csv extension
+                if not filepath.lower().endswith('.csv'):
+                    filepath += '.csv'
+                    
+                with open(filepath, "w", newline='', encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Date", "Name", "Type", "Size (Bytes)", "Status", "URL", "Error"])
+                    for entry in self.history.history:
+                        writer.writerow([
+                            entry.get("date", ""),
+                            entry.get("name", ""),
+                            entry.get("type", ""),
+                            entry.get("size", 0),
+                            entry.get("status", ""),
+                            entry.get("url", ""),
+                            entry.get("error", "")
+                        ])
+                self.notify(f"History exported successfully", severity="information", timeout=5)
+                logging.info(f"[TermoLoad] History exported to {filepath}")
+            except Exception:
+                logging.exception("[TermoLoad] failed to export history to CSV")
+                self.notify("Failed to export history", severity="error")
+        
+        asyncio.create_task(do_export())
         
     def _get_selected_download(self) -> Optional[Dict[str, Any]]:
         try:
@@ -3377,7 +3730,7 @@ class TermoLoad(App):
             fp = d.get("filepath")
             if fp:
                 return Path(fp)
-            base_dir = d.get("path") or self.settings.get("download_folder", str(Path.cwd() / "downloads"))
+            base_dir = d.get("path") or self.settings.get("download_folder", str(Path.home() / "Downloads"))
             name = d.get("name")
             if base_dir and name:
                 return Path(base_dir) / name

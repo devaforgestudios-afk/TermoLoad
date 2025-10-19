@@ -12,11 +12,27 @@ if errorlevel 1 (
     echo.
 )
 
-echo Building executable with PyInstaller...
+echo Building executable with PyInstaller (mode: %1, windowed: %2)...
 echo This may take a few minutes...
 echo.
 
-pyinstaller build_exe.spec --clean
+REM Default to onedir (faster startup) and console mode for better performance
+set MODE=%1
+set WINDOWED=%2
+if "%MODE%"=="" set MODE=onedir
+if "%WINDOWED%"=="" set WINDOWED=console
+
+REM Build args
+set PYI_ARGS=--clean
+if "%MODE%"=="onefile" (
+    set PYI_ARGS=%PYI_ARGS% --onefile
+)
+if "%WINDOWED%"=="noconsole" (
+    set PYI_ARGS=%PYI_ARGS% --noconsole
+)
+
+echo Running: pyinstaller %PYI_ARGS% build_exe.spec
+pyinstaller %PYI_ARGS% build_exe.spec
 
 if errorlevel 1 (
     echo.
