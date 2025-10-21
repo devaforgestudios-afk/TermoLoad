@@ -1,10 +1,35 @@
 # TermoLoad - Download Manager
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/devaforgestudios-afk/TermoLoad/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/devaforgestudios-afk/TermoLoad/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/devaforgestudios-afk/TermoLoad/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A powerful, terminal-based download manager with full BitTorrent support and a beautiful TUI interface. TermoLoad provides a modern solution for managing HTTP/HTTPS/FTP downloads and torrents with concurrent downloads, speed tracking, and comprehensive error handling.
+A powerful, cross-platform terminal-based download manager with full BitTorrent support and a beautiful TUI interface. TermoLoad provides a modern solution for managing HTTP/HTTPS/FTP downloads and torrents with concurrent downloads, speed tracking, and comprehensive error handling.
+
+## 📂 Project Structure
+
+```
+TermoLoad/
+├── app.py                      # Main application
+├── requirements.txt            # Python dependencies
+├── README.md                   # This file
+│
+├── docs/                       # Documentation
+│   ├── LINUX_BUILD_GUIDE.md    # Linux building reference
+│   ├── WSL_QUICK_START.md      # WSL setup for Windows users
+│   ├── CROSS_PLATFORM_CHANGES.md
+│   ├── TESTING_CHECKLIST.md
+│   └── ...
+│
+├── scripts/                    # Build scripts
+│   ├── build_exe.bat           # Windows build script
+│   ├── build_linux.sh          # Linux executable builder
+│   ├── build_appimage.sh       # AppImage creator
+│   └── build_deb.sh            # Debian package builder
+│
+├── test/                       # Test files
+└── .github/                    # GitHub workflows (CI/CD)
+```
 
 ## 📦 Download Executable (v1.0)
 
@@ -373,6 +398,60 @@ Download history is stored in `~/.termoload_history.json`:
 - **File Logs**: All logs are written to `termoload.log`
 - **In-App Logs**: View the last 20 lines in the Logs tab
 - **Log Levels**: DEBUG, INFO, ERROR
+
+## 🏗️ Building from Source
+
+### Windows
+
+Build a Windows executable using the provided script:
+
+```batch
+# Run the build script
+scripts\build_exe.bat
+
+# Or for faster build (one-folder mode)
+scripts\build_fast.bat
+```
+
+The executable will be created in the `dist/` folder.
+
+### Linux
+
+For detailed Linux build instructions, see [docs/LINUX_BUILD_GUIDE.md](docs/LINUX_BUILD_GUIDE.md).
+
+**Quick build on Linux:**
+```bash
+# Build standalone executable
+./scripts/build_linux.sh
+
+# Build AppImage (universal package)
+./scripts/build_appimage.sh
+
+# Build DEB package (Debian/Ubuntu)
+./scripts/build_deb.sh
+```
+
+**Build on Windows using WSL:**
+
+See [docs/WSL_QUICK_START.md](docs/WSL_QUICK_START.md) for a step-by-step guide to building Linux executables on Windows using WSL (no Linux machine needed!).
+
+```powershell
+# Install WSL (one-time setup)
+wsl --install
+
+# After restart, in WSL terminal:
+cd /mnt/e/TermoLoad
+./scripts/build_linux.sh
+```
+
+### Cross-Platform Notes
+
+- **Sound notifications**: Work on Windows, macOS, and Linux with automatic fallback
+- **Firewall handling**: Platform-specific handling (Windows Firewall, UFW info, macOS auto-prompt)
+- **File operations**: Cross-platform file dialogs and folder opening
+- **Requirements**: All dependencies are cross-platform compatible
+
+For complete cross-platform implementation details, see [docs/CROSS_PLATFORM_CHANGES.md](docs/CROSS_PLATFORM_CHANGES.md).
 
 ## 🛠️ Troubleshooting
 

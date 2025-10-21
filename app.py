@@ -83,10 +83,50 @@ import random
 import shutil
 import subprocess
 import ctypes
-import winsound
+
+# Platform-specific imports
+if sys.platform == 'win32':
+    import winsound
+
 from urllib.parse import urlparse
 import queue
 import concurrent.futures
+
+def play_notification_sound(frequency=800, duration=150, sound_type='info'):
+    """Cross-platform notification sound."""
+    try:
+        if sys.platform == 'win32':
+            import winsound
+            winsound.Beep(frequency, duration)
+        elif sys.platform == 'darwin':
+            # macOS uses afplay for system sounds
+            sound_map = {
+                'info': '/System/Library/Sounds/Glass.aiff',
+                'complete': '/System/Library/Sounds/Hero.aiff',
+                'error': '/System/Library/Sounds/Basso.aiff'
+            }
+            sound_file = sound_map.get(sound_type, sound_map['info'])
+            subprocess.run(['afplay', sound_file], check=False, capture_output=True, timeout=2)
+        elif sys.platform.startswith('linux'):
+            # Linux - try multiple sound systems
+            try:
+                # Try paplay (PulseAudio) first
+                subprocess.run(['paplay', '/usr/share/sounds/freedesktop/stereo/message.oga'], 
+                             check=False, capture_output=True, timeout=2)
+            except FileNotFoundError:
+                try:
+                    # Try aplay (ALSA) as fallback
+                    subprocess.run(['aplay', '/usr/share/sounds/alsa/Front_Center.wav'],
+                                 check=False, capture_output=True, timeout=2)
+                except FileNotFoundError:
+                    try:
+                        # Try beep command as last resort
+                        subprocess.run(['beep', '-f', str(frequency), '-l', str(duration)],
+                                     check=False, capture_output=True, timeout=2)
+                    except FileNotFoundError:
+                        pass  # No sound available - silent operation
+    except Exception as e:
+        logging.debug(f"[TermoLoad] Could not play sound: {e}")
 
 class TkinterDialogHelper:
     """Thread-safe async helper for tkinter file dialogs to prevent EXE hanging."""
@@ -360,16 +400,34 @@ class RealDownloader:
                 self.torrent_session = None
     
     def _request_firewall_permission(self):
-        """Request Windows Firewall permission for torrent connections"""
+        """Request firewall permission for torrent connections (cross-platform)"""
         try:
             import sys
             import subprocess
             import os
             
-            # Only on Windows
-            if sys.platform != 'win32':
+            # Handle different platforms
+            if sys.platform == 'darwin':
+                # macOS: System will prompt automatically for network access
+                logging.info("[TermoLoad] macOS will prompt for network access if needed")
+                return
+            elif sys.platform.startswith('linux'):
+                # Linux: Check if ufw is available and log helpful info
+                try:
+                    result = subprocess.run(['which', 'ufw'], 
+                                          capture_output=True, timeout=1)
+                    if result.returncode == 0:
+                        logging.info("[TermoLoad] Linux firewall detected (ufw)")
+                        logging.info("[TermoLoad] To allow torrents: sudo ufw allow 6881/tcp")
+                        logging.info("[TermoLoad] To allow torrents: sudo ufw allow 6881/udp")
+                except:
+                    pass
+                return
+            elif sys.platform != 'win32':
+                # Other platforms
                 return
             
+            # Windows-specific code continues below
             # Get the executable path
             if getattr(sys, 'frozen', False):
                 # Running as compiled executable
@@ -378,12 +436,16 @@ class RealDownloader:
                 # Running as script
                 exe_path = sys.executable
             
-            # Check if running with admin rights
+            # Check if running with admin rights (Windows only at this point)
             try:
                 is_admin = os.getuid() == 0
             except AttributeError:
-                import ctypes
-                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                # Windows
+                if sys.platform == 'win32':
+                    import ctypes
+                    is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                else:
+                    is_admin = False
             
             if is_admin:
                 # Add firewall rule using netsh
@@ -2291,9 +2353,9 @@ class TermoLoad(App):
         
         def _play():
             try:
-                winsound.Beep(800, 150) 
+                play_notification_sound(800, 150, 'info')
                 time.sleep(0.05)
-                winsound.Beep(1000, 200)
+                play_notification_sound(1000, 200, 'complete')
             except Exception:
                 logging.debug("[TermoLoad] Failed to play completion sound")
         
@@ -2305,9 +2367,9 @@ class TermoLoad(App):
         
         def _play():
             try:
-                winsound.Beep(500, 200) 
+                play_notification_sound(500, 200, 'error')
                 time.sleep(0.05)
-                winsound.Beep(300, 250)
+                play_notification_sound(300, 250, 'error')
             except Exception:
                 logging.debug("[TermoLoad] Failed to play error sound")
         
