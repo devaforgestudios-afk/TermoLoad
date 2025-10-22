@@ -21,6 +21,7 @@ a = Analysis(
         'pystray',
         'tkinter',
         'tkinter.filedialog',
+        'yt_dlp',
     ],
     hookspath=[],
     hooksconfig={},

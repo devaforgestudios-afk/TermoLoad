@@ -1086,80 +1086,112 @@ class RealDownloader:
     
 
     async def download_with_ytdlp(self,url:str,download_id:int, custom_path: str, filename:str | None = None, audio_only:bool = False, ytdlp_format:str | None = None)->bool:
+        """Simple, straightforward yt-dlp download - no cookies, no complex strategies."""
         if ytdlp is None:
             self.update_download_progress(download_id, 0.0, 0, 0, "Error: yt-dlp not installed")
             logging.error("[TermoLoad] yt-dlp not installed, cannot download video URLs")
             return False
+        
         try:
+            # Create download directory
             Path(custom_path or "downloads").mkdir(parents=True, exist_ok=True)
+            
+            # Setup output template
             if filename:
                 outtmpl = str((Path(custom_path)/filename).with_suffix(".%(ext)s"))
             else:
                 outtmpl = str(Path(custom_path)/"%(title)s.%(ext)s")
             
+            # Progress hook
             def _hook(d: dict):
-                status = d.get("status")
-                if status == "downloading":
-                    downloaded = int(d.get("downloaded_bytes") or 0)
-                    total = int(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
-                    speed = float(d.get("speed") or 0)
-                    eta = float(d.get("eta") or 0)
-                    progress = (downloaded / total) if total else 0.0
-                    try:
-                        item = next((x for x in self.app.downloads if x.get("id") == download_id), None)
-                        if item is not None:
-                            item["downloaded_bytes"] = downloaded
-                            if total:
-                                item["total_size"] = total
-                    except Exception:
-                        pass
-                    self.update_download_progress(download_id, progress, speed, eta, "Downloading")
-
-                elif status == "finished":
-                    self.update_download_progress(download_id,1.0,0,0, "Processing")
+                try:
+                    status = d.get("status")
+                    if status == "downloading":
+                        downloaded = int(d.get("downloaded_bytes") or 0)
+                        total = int(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
+                        speed = float(d.get("speed") or 0)
+                        eta = float(d.get("eta") or 0)
+                        progress = (downloaded / total) if total else 0.0
                         
+                        # Update item info
+                        try:
+                            item = next((x for x in self.app.downloads if x.get("id") == download_id), None)
+                            if item is not None:
+                                item["downloaded_bytes"] = downloaded
+                                if total:
+                                    item["total_size"] = total
+                        except Exception:
+                            pass
+                        
+                        self.update_download_progress(download_id, progress, speed, eta, "Downloading")
+                    
+                    elif status == "finished":
+                        self.update_download_progress(download_id, 1.0, 0, 0, "Processing")
+                        logging.info(f"[TermoLoad] Download {download_id} finished, processing...")
+                except Exception as e:
+                    logging.warning(f"[TermoLoad] Progress hook error: {e}")
+            
+            # Simple yt-dlp options - no complex extraction args
             ytdlp_opts = {
                 "outtmpl": outtmpl,
                 "noprogress": True,
                 "progress_hooks": [_hook],
                 "continuedl": True,
-                "retries" : 5,
-                "ignoreerrors": True,
-                "concurrent_fragment_downloads": 5,
+                "retries": 5,
+                "fragment_retries": 5,
             }
+            
+            # Format selection
             if audio_only:
                 ytdlp_opts["format"] = "bestaudio/best"
-                ytdlp_opts["postprocessors"] = [
-                    {"key":"FFmpegExtractAudio","preferredcodec":"mp3","preferredquality":"192"}
-                    ]
+                ytdlp_opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192"
+                }]
             else:
-                ytdlp_opts["format"] = ytdlp_format or "bestvideo+bestaudio/best"
-                ytdlp_opts["merge_output_format"] = "mp4"
+                ytdlp_opts["format"] = ytdlp_format or "best"
             
+            logging.info(f"[TermoLoad] Starting yt-dlp download {download_id}: {url}")
+            
+            # Simple download function
             def _run():
                 with ytdlp.YoutubeDL(ytdlp_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    try:
-                        final_path = info.get("requested_downloads", [{}])[0].get("filepath") or info.get("filepath")
-                        if final_path:
+                    ydl.download([url])
+                
+                # Find downloaded file (newest file in directory)
+                download_dir = Path(custom_path)
+                if download_dir.exists():
+                    files = sorted(download_dir.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    for f in files:
+                        if f.is_file():
+                            # Update download info
                             for item in self.app.downloads:
                                 if item.get("id") == download_id:
-                                    item["filepath"] = final_path
-                                    try:
-                                        item["name"] = os.path.basename(final_path)
-                                    except Exception:
-                                        pass
+                                    item["filepath"] = str(f)
+                                    item["name"] = f.name
                                     break
-                    except Exception:
-                        pass
+                            logging.info(f"[TermoLoad] Downloaded: {f.name}")
+                            return str(f)
+                
+                return None
             
-            await asyncio.to_thread(_run)
-            self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
-            try:
-                self.app.save_downloads_state(force=True)
-            except Exception:
-                pass
-            return True
+            # Run download
+            result_path = await asyncio.to_thread(_run)
+            
+            if result_path and os.path.exists(result_path):
+                self.update_download_progress(download_id, 1.0, 0, 0, "Completed")
+                logging.info(f"[TermoLoad] Download {download_id} completed successfully")
+                try:
+                    self.app.save_downloads_state(force=True)
+                except Exception:
+                    pass
+                return True
+            else:
+                self.update_download_progress(download_id, 0.0, 0, 0, "Error: Download failed")
+                logging.error(f"[TermoLoad] Download {download_id} failed")
+                return False
+        
         except asyncio.CancelledError:
             try:
                 d = next((x for x in self.app.downloads if x.get("id") == download_id),None)
@@ -1172,9 +1204,14 @@ class RealDownloader:
             except Exception:
                 pass
             return False
+        
         except Exception as e:
-            logging.exception(f"[TermoLoad] download_with_ytdlp exception id={download_id}: {e}")
-            self.update_download_progress(download_id, 0, 0, 0, f"Error:{str(e)}")
+            logging.exception(f"[TermoLoad] download_with_ytdlp failed id={download_id}: {e}")
+            
+            # Simple error message
+            error_msg = str(e)[:100] if len(str(e)) > 100 else str(e)
+            
+            self.update_download_progress(download_id, 0, 0, 0, f"Error: {error_msg}")
             try:
                 self.app.save_downloads_state(force=True)
             except Exception:
@@ -4747,4 +4784,4 @@ if __name__ == "__main__":
     
     # Then launch the main app
     app = TermoLoad()
-    app.run()
+    app.run() 

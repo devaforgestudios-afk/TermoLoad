@@ -6,7 +6,18 @@
 
 A powerful, cross-platform terminal-based download manager with full BitTorrent support and a beautiful TUI interface. TermoLoad provides a modern solution for managing HTTP/HTTPS/FTP downloads and torrents with concurrent downloads, speed tracking, and comprehensive error handling.
 
-## 📂 Project Structure
+## � YouTube Downloads
+
+**Having issues downloading YouTube videos?** YouTube requires authentication to prevent bot downloads.
+
+**Quick Fix:**
+```bash
+python export_cookies.py
+```
+
+This will export your YouTube cookies to bypass bot detection. See [docs/YOUTUBE_COOKIES_GUIDE.md](docs/YOUTUBE_COOKIES_GUIDE.md) for detailed instructions.
+
+## �📂 Project Structure
 
 ```
 TermoLoad/
