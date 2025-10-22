@@ -4,3 +4,4 @@ aiofiles
 Pillow
 pystray
 pyinstaller
+libtorrent
